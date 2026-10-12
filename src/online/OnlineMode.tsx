@@ -32,6 +32,8 @@ export const OnlineMode: React.FC<OnlineModeProps> = ({ initialCode, localLibrar
   const [adminKey, setAdminKey] = useState(() => localStorage.getItem('online_admin_key') || '');
   const [publishing, setPublishing] = useState<{ done: number; total: number } | null>(null);
   const [showPublish, setShowPublish] = useState(false);
+  // Biblioteca leída de la carpeta data/ del simulador (para publicar desde el navegador)
+  const [folderLibrary, setFolderLibrary] = useState<OnlineModeProps['localLibrary'] | null>(null);
 
   const [shufflingIds, setShufflingIds] = useState<Set<string>>(new Set());
   const [selectRequest, setSelectRequest] = useState<string[] | null>(null);
@@ -129,7 +131,7 @@ export const OnlineMode: React.FC<OnlineModeProps> = ({ initialCode, localLibrar
     localStorage.setItem('online_admin_key', adminKey);
     setPublishing({ done: 0, total: 1 });
     try {
-      await publishLibrary(serverUrl, adminKey, localLibrary, (done, total) => setPublishing({ done, total }));
+      await publishLibrary(serverUrl, adminKey, source, (done, total) => setPublishing({ done, total }));
       await loadLibrary(serverUrl);
       toast('Mazos publicados en el servidor');
       setShowPublish(false);
@@ -140,7 +142,33 @@ export const OnlineMode: React.FC<OnlineModeProps> = ({ initialCode, localLibrar
     }
   };
 
-  const localCount = localLibrary.templates.length;
+  const source = localLibrary.templates.length > 0 ? localLibrary : folderLibrary || localLibrary;
+  const localCount = source.templates.length;
+
+  // Lee db.json e imágenes de la carpeta data/ elegida por el usuario
+  const handleDataFolder = async (files: FileList | null) => {
+    if (!files) return;
+    const list = Array.from(files);
+    const dbFile = list.find((f) => f.name === 'db.json');
+    if (!dbFile) return toast('No encuentro db.json: elige la carpeta "data" que está junto al .exe');
+    try {
+      const db = JSON.parse(await dbFile.text());
+      const images = new Map(list.filter((f) => /\.(png|jpe?g|webp)$/i.test(f.name)).map((f) => [f.name, f]));
+      const urlFor = (id: string) => {
+        const f = images.get(`${id}.png`) || images.get(`${id}.jpg`) || images.get(`${id}.webp`);
+        return f ? URL.createObjectURL(f) : undefined;
+      };
+      const templates: CardTemplate[] = (db.templates || []).map((t: CardTemplate) => ({ ...t, imageUrl: urlFor(t.id) }));
+      const backUrls: Record<string, string> = {};
+      for (const b of db.backs || []) {
+        const u = urlFor(b.id);
+        if (u) backUrls[b.id] = u;
+      }
+      setFolderLibrary({ templates: templates.filter((t) => t.imageUrl), backUrls, deckNames: db.deckNames || {} });
+    } catch {
+      toast('No se pudo leer db.json');
+    }
+  };
   const libraryDecks = Object.keys(library.deckNames).length;
 
   // Pinta la mesa cuando ya estamos en una sala
@@ -277,7 +305,7 @@ export const OnlineMode: React.FC<OnlineModeProps> = ({ initialCode, localLibrar
         {busy && <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Conectando…</div>}
         {game.fatalError && <div style={{ fontSize: '0.85rem', color: 'var(--color-danger)' }}>{game.fatalError}</div>}
 
-        {localCount > 0 && serverUrl && !libraryError && (
+        {serverUrl && !libraryError && (
           <div style={{ borderTop: '1px solid var(--glass-border)', paddingTop: 14 }}>
             {!showPublish ? (
               <button className="btn-secondary" onClick={() => setShowPublish(true)} style={{ width: '100%', padding: 8, fontSize: '0.8rem' }}>
@@ -285,10 +313,23 @@ export const OnlineMode: React.FC<OnlineModeProps> = ({ initialCode, localLibrar
               </button>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', lineHeight: 1.45 }}>
-                  Sube tus {Object.keys(localLibrary.deckNames).length} mazos ({localCount} diseños) para que ambos jugadores puedan usarlos.
+                {localLibrary.templates.length === 0 && (
+                  <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', lineHeight: 1.45 }}>
+                    Elige la carpeta <strong>data</strong> que está junto al .exe del simulador:
+                    <input
+                      type="file"
+                      // @ts-expect-error atributo no estándar para elegir carpetas
+                      webkitdirectory=""
+                      multiple
+                      onChange={(e) => handleDataFolder(e.target.files)}
+                      style={{ display: 'block', marginTop: 6, color: '#fff' }}
+                    />
+                  </label>
+                )}
+                {localCount > 0 && <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', lineHeight: 1.45 }}>
+                  Sube tus {Object.keys(source.deckNames).length} mazos ({localCount} diseños) para que ambos jugadores puedan usarlos.
                   Las imágenes se reducen antes de subirlas. Sustituye lo que hubiera publicado antes.
-                </p>
+                </p>}
                 <input
                   style={inputStyle}
                   type="password"
@@ -296,7 +337,7 @@ export const OnlineMode: React.FC<OnlineModeProps> = ({ initialCode, localLibrar
                   placeholder="Clave de administrador (ADMIN_KEY)"
                   onChange={(e) => setAdminKey(e.target.value)}
                 />
-                <button className="btn-primary" disabled={!!publishing} onClick={handlePublish} style={{ padding: 10, fontSize: '0.85rem' }}>
+                <button className="btn-primary" disabled={!!publishing || localCount === 0} onClick={handlePublish} style={{ padding: 10, fontSize: '0.85rem' }}>
                   {publishing ? `Subiendo… ${publishing.done}/${publishing.total}` : 'Publicar ahora'}
                 </button>
               </div>
