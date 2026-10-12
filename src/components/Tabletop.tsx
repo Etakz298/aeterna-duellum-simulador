@@ -25,6 +25,11 @@ interface TabletopProps {
   onRotateSelected: (degrees: number) => void;
   onDeleteSelected: () => void;
   onShuffleSelected: () => void;
+  // Opcionales (modo online)
+  onCardsDropped?: (ids: string[], clientX: number, clientY: number) => boolean;
+  onDragStateChange?: (isDragging: boolean) => void;
+  onExtraKey?: (key: string) => boolean;
+  viewportRef?: React.MutableRefObject<{ clientToBoard: (clientX: number, clientY: number) => Position } | null>;
 }
 
 export const Tabletop: React.FC<TabletopProps> = ({
@@ -48,6 +53,10 @@ export const Tabletop: React.FC<TabletopProps> = ({
   onRotateSelected,
   onDeleteSelected,
   onShuffleSelected,
+  onCardsDropped,
+  onDragStateChange,
+  onExtraKey,
+  viewportRef,
 }) => {
   const tabletopRef = useRef<HTMLDivElement>(null);
 
@@ -67,6 +76,24 @@ export const Tabletop: React.FC<TabletopProps> = ({
   const [isMarquee, setIsMarquee] = useState<boolean>(false);
   const [marqueeStart, setMarqueeStart] = useState<Position>({ x: 0, y: 0 });
   const [marqueeCurrent, setMarqueeCurrent] = useState<Position>({ x: 0, y: 0 });
+
+  // Expose screen -> board coordinate conversion to the parent
+  useEffect(() => {
+    if (!viewportRef) return;
+    viewportRef.current = {
+      clientToBoard: (clientX: number, clientY: number) => {
+        const rect = tabletopRef.current?.getBoundingClientRect();
+        return {
+          x: (clientX - (rect?.left || 0) - pan.x) / zoom,
+          y: (clientY - (rect?.top || 0) - pan.y) / zoom,
+        };
+      },
+    };
+  }, [viewportRef, pan, zoom]);
+
+  useEffect(() => {
+    onDragStateChange?.(isDragging);
+  }, [isDragging, onDragStateChange]);
 
   // Create template map for quick access
   const templateMap = new Map(templates.map((t) => [t.id, t]));
@@ -129,12 +156,14 @@ export const Tabletop: React.FC<TabletopProps> = ({
       } else if (key === 'z') {
         e.preventDefault();
         onShuffleSelected();
+      } else if (onExtraKey && onExtraKey(key)) {
+        e.preventDefault();
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onFlipSelected, onRotateSelected, onDeleteSelected, onShuffleSelected]);
+  }, [onFlipSelected, onRotateSelected, onDeleteSelected, onShuffleSelected, onExtraKey]);
 
   // Pointer Down on background (felt)
   const handlePointerDown = (e: React.PointerEvent) => {
@@ -311,7 +340,19 @@ export const Tabletop: React.FC<TabletopProps> = ({
     }
   };
 
-  const handlePointerUp = () => {
+  const handlePointerUp = (e: React.PointerEvent) => {
+    if (isDragging && onCardsDropped) {
+      const draggedIds = Object.entries(dragStartPositions.current)
+        .filter(([, pos]) => pos.type === 'card')
+        .map(([id]) => id);
+      if (draggedIds.length > 0 && onCardsDropped(draggedIds, e.clientX, e.clientY)) {
+        setIsPanning(false);
+        setIsDragging(false);
+        setIsMarquee(false);
+        return;
+      }
+    }
+
     if (isDragging) {
       const draggedCardIds = Array.from(selectedCardIds);
       if (draggedCardIds.length > 0) {

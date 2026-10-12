@@ -26,3 +26,6 @@ dist-ssr
 # Electron build output and local card data
 dist-desktop
 data/
+
+# Datos del servidor online en local
+server-data
