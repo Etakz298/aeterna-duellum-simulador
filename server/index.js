@@ -336,6 +336,23 @@ wss.on('connection', (ws) => {
 
       const room = ws.room;
       if (!room) return send(ws, { t: 'error', message: 'No estás en ninguna sala.' });
+
+      // Abandonar la partida: el sitio no se puede recuperar y se avisa al rival
+      if (msg.t === 'leave') {
+        const game = room.game;
+        const player = game.players[ws.seat];
+        player.left = true;
+        player.connected = false;
+        player.token = null;
+        delete room.sockets[ws.seat];
+        ws.room = null;
+        game.addLog(`${player.name} ha abandonado la partida.`);
+        game.bump();
+        if (SEATS.every((s) => !game.players[s] || game.players[s].left)) rooms.delete(game.code);
+        else broadcastState(room);
+        ws.close();
+        return;
+      }
       const result = room.game.apply(ws.seat, msg, library);
       if (result.private) send(ws, result.private);
       // Los movimientos se envían en ligero al rival para no saturar la red

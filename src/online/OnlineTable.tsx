@@ -313,7 +313,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
               <span style={{ flex: 1, color: p ? '#fff' : 'var(--text-muted)' }}>
                 {p ? p.name : 'Esperando rival…'}
                 {seat === me ? ' (tú)' : ''}
-                {p && !p.connected ? ' · desconectado' : ''}
+                {p && p.left ? ' · ha salido' : p && !p.connected ? ' · desconectado' : ''}
               </span>
               {p && <span style={{ color: 'var(--text-muted)', fontSize: '0.72rem' }}>{p.handCount} en mano</span>}
             </div>
@@ -379,8 +379,8 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
             Reiniciar mesa
           </button>
         </div>
-        <button className="btn-secondary" onClick={onLeave} style={{ padding: '6px', fontSize: '0.75rem' }}>
-          <LogOut size={13} /> Salir al modo un jugador
+        <button className="btn-danger" onClick={onLeave} style={{ padding: '8px', fontSize: '0.8rem' }}>
+          <LogOut size={14} /> Salir de la partida
         </button>
         <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', lineHeight: 1.4 }}>
           R: robar · H: a la mano · F: voltear · Q/E: rotar · Z: barajar · Doble clic: coger montón

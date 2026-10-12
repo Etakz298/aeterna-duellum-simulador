@@ -195,6 +195,9 @@ export function useOnlineGame(handlers: {
 
   const leave = useCallback(() => {
     leavingRef.current = true;
+    // Avisar al servidor para que el rival sepa que nos hemos ido
+    const ws = wsRef.current;
+    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ t: 'leave' }));
     window.clearTimeout(retryRef.current);
     storeSession(null);
     sessionRef.current = null;
