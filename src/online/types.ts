@@ -34,6 +34,7 @@ export interface OnlinePlayer {
   connected: boolean;
   deckId: string | null;
   handCount: number;
+  left?: boolean;
 }
 
 export interface LogEntry {

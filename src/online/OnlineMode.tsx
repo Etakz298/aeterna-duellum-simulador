@@ -117,11 +117,11 @@ export const OnlineMode: React.FC<OnlineModeProps> = ({ initialCode, localLibrar
   const handleLeave = () => {
     setModal({
       title: 'Salir de la partida',
-      message: 'Saldrás de la sala online y volverás al modo un jugador. ¿Seguro?',
+      message: 'Saldrás de la sala y volverás al menú online. Tu rival verá que has abandonado la partida. ¿Seguro?',
       onConfirm: () => {
         game.leave();
         clearSalaFromUrl();
-        onExit();
+        setCode('');
       },
     });
   };

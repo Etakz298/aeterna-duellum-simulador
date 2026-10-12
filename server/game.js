@@ -118,6 +118,7 @@ export class Game {
         connected: p.connected,
         deckId: p.deckId,
         handCount: [...this.cards.values()].filter((c) => c.zone === 'hand' && c.owner === s).length,
+        left: !!p.left,
       };
     }
 
