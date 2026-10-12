@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import type { CardTemplate } from '../types';
-import { Trash2, Upload, UserPlus, Search, HelpCircle, Edit2, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Trash2, Upload, UserPlus, Search, HelpCircle, Edit2, ChevronLeft, ChevronRight, Globe } from 'lucide-react';
 import UTIF from 'utif';
 
 // TIFF decoding to standard PNG Blob helper
@@ -67,6 +67,7 @@ interface SidebarProps {
   onUploadBack: (deckId: string, id: 'backA' | 'backB', blob: Blob) => Promise<void>;
   onDeleteBack: (deckId: string, id: 'backA' | 'backB') => Promise<void>;
   showAlert: (title: string, message: string) => void;
+  onOpenOnline?: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -90,6 +91,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onUploadBack,
   onDeleteBack,
   showAlert,
+  onOpenOnline,
 }) => {
   // Navigation & UI States
   const [searchQuery, setSearchQuery] = useState('');
@@ -381,6 +383,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
         
         {/* Game Utilities */}
         <section>
+          {onOpenOnline && (
+            <button
+              className="btn-primary"
+              onClick={onOpenOnline}
+              style={{ width: '100%', padding: '10px', fontSize: '0.85rem', marginBottom: '8px' }}
+            >
+              <Globe size={16} /> Jugar Online (1 vs 1)
+            </button>
+          )}
           <div style={{ display: 'flex', gap: '8px' }}>
             <button className="btn-primary" onClick={onAddCounter} style={{ flex: 1, padding: '10px', fontSize: '0.85rem' }}>
               <UserPlus size={16} /> Añadir Contador

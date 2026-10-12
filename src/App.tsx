@@ -11,6 +11,11 @@ import {
   deleteCardBack,
 } from './db';
 import { RotateCw, RotateCcw, Eye, Shuffle, Trash2 } from 'lucide-react';
+import { OnlineMode } from './online/OnlineMode';
+import { loadStoredSession } from './online/useOnlineGame';
+
+// Un enlace de invitación (?sala=CODIGO) o una partida a medias abren el modo online
+const initialSala = new URLSearchParams(window.location.search).get('sala')?.toUpperCase() || undefined;
 
 interface ModalState {
   isOpen: boolean;
@@ -75,6 +80,11 @@ export default function App() {
 
   // Sidebar visibility state
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(true);
+
+  // Game mode: local single player or online 1 vs 1
+  const [mode, setMode] = useState<'local' | 'online'>(() =>
+    initialSala || loadStoredSession() ? 'online' : 'local'
+  );
 
   // Check if running inside Electron wrapper
   const isElectron = typeof window !== 'undefined' && !!window.electronAPI;
@@ -649,6 +659,16 @@ export default function App() {
 
   const hasSelection = selectedCardIds.size > 0 || selectedCounterIds.size > 0;
 
+  if (mode === 'online') {
+    return (
+      <OnlineMode
+        initialCode={initialSala}
+        localLibrary={{ templates, backUrls, deckNames }}
+        onExit={() => setMode('local')}
+      />
+    );
+  }
+
   return (
     <div style={{ width: '100vw', height: '100vh', position: 'relative', overflow: 'hidden' }}>
       {/* Sidebar Panel */}
@@ -673,6 +693,7 @@ export default function App() {
         onUploadBack={handleUploadBack}
         onDeleteBack={handleDeleteBack}
         showAlert={showAlert}
+        onOpenOnline={() => setMode('online')}
       />
 
       {/* Floating Toolbar */}
