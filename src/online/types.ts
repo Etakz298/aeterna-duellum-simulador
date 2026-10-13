@@ -1,39 +1,44 @@
-import type { CardTemplate, LifeCounter } from '../types';
+import type { CardTemplate } from '../types';
 
 export type Seat = 'p1' | 'p2';
+export type BackType = 'backA' | 'backB';
 
-// Carta sobre la mesa tal y como la envía el servidor.
+// Carta en una zona de juego tal y como la envía el servidor.
 // Si está boca abajo no trae templateId: el cliente no sabe qué carta es.
-export interface OnlineBoardCard {
+export interface OnlinePlayCard {
   id: string;
   owner: Seat;
   deckId: string;
-  backType: 'backA' | 'backB';
-  x: number;
+  backType: BackType;
+  x: number; // relativa a la zona de juego, vista por su dueño
   y: number;
   isFaceUp: boolean;
   rotation: number;
-  zIndex: number;
+  order: number;
   templateId?: string;
 }
 
-export interface OnlineHandCard {
-  id: string;
-  templateId: string;
+export interface CardBackInfo {
   deckId: string;
-  backType: 'backA' | 'backB';
+  backType: BackType;
 }
 
-export interface OpponentHandCard {
-  deckId: string;
-  backType: 'backA' | 'backB';
+export interface OnlineSide {
+  library: { count: number; top: CardBackInfo | null };
+  graveyard: (CardBackInfo & { id: string })[];
+  play: OnlinePlayCard[];
+  handCount: number;
+}
+
+export interface OnlineHandCard extends CardBackInfo {
+  id: string;
+  templateId: string;
 }
 
 export interface OnlinePlayer {
   name: string;
   connected: boolean;
   deckId: string | null;
-  handCount: number;
   left?: boolean;
 }
 
@@ -44,21 +49,28 @@ export interface LogEntry {
   text: string;
 }
 
+export interface OnlineToken {
+  id: string;
+  x: number;
+  y: number;
+}
+
 export interface OnlineState {
   code: string;
   you: Seat;
   rev: number;
   players: Partial<Record<Seat, OnlinePlayer>>;
-  cards: OnlineBoardCard[];
+  me: OnlineSide;
+  opp: OnlineSide;
   hand: OnlineHandCard[];
-  oppHand: OpponentHandCard[];
-  counters: LifeCounter[];
+  oppHand: CardBackInfo[];
+  life: { me: number; opp: number };
+  tokens: OnlineToken[];
   log: LogEntry[];
 }
 
 export interface StateEffects {
   by?: Seat;
-  shuffle?: string[];
   select?: string[];
   reveal?: { by: Seat; templateId: string };
 }
@@ -67,6 +79,11 @@ export interface PeekCard {
   id: string;
   templateId: string;
   name: string;
+}
+
+export interface PeekResult {
+  zone: 'library' | 'graveyard';
+  cards: PeekCard[];
 }
 
 export interface ServerLibrary {

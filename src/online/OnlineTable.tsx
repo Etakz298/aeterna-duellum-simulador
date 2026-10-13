@@ -1,28 +1,45 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
+  Archive,
   Copy,
   Eye,
+  EyeOff,
   Hand,
+  Layers,
   LogOut,
   MessageSquare,
+  Minus,
+  Plus,
+  RefreshCw,
   RotateCcw,
   RotateCw,
   Search,
   Shuffle,
-  Trash2,
-  UserPlus,
-  Layers,
-  RefreshCw,
   X,
 } from 'lucide-react';
-import { Tabletop } from '../components/Tabletop';
-import type { BoardCard, CardTemplate, Position } from '../types';
-import type { OnlineState, PeekCard, Seat, ServerLibrary } from './types';
-import { HandBar, OpponentHand } from './HandBar';
+import type { CardTemplate } from '../types';
+import type { CardBackInfo, OnlinePlayCard, OnlineState, PeekResult, Seat, ServerLibrary } from './types';
+import {
+  BOARD_H,
+  BOARD_W,
+  CARD_H,
+  CARD_W,
+  LIFE_MAX,
+  LIFE_MIN,
+  PLAY_H,
+  PLAY_W,
+  SIDE_W,
+  TOKEN_SIZE,
+  clamp,
+  inRect,
+  playCardPos,
+  zoneRect,
+  type Rect,
+  type SideKey,
+  type ZoneKey,
+} from './layout';
 import { inviteLink } from './server';
 import type { ConnectionStatus } from './useOnlineGame';
-
-const hiddenTemplateId = (deckId: string, backType: string) => `hidden:${deckId}:${backType}`;
 
 interface OnlineTableProps {
   state: OnlineState;
@@ -30,13 +47,11 @@ interface OnlineTableProps {
   library: ServerLibrary;
   serverUrl: string;
   send: (msg: object) => void;
-  moveItems: (kind: 'card' | 'counter', updates: { id: string; x: number; y: number }[]) => void;
-  flushMoves: () => void;
   patchState: (fn: (s: OnlineState) => OnlineState) => void;
-  shufflingIds: Set<string>;
   selectRequest: string[] | null;
-  peek: PeekCard[] | null;
+  peek: PeekResult | null;
   onClosePeek: () => void;
+  onPeekTaken: (id: string) => void;
   reveal: { by: Seat; templateId: string } | null;
   onCloseReveal: () => void;
   onReloadLibrary: () => void;
@@ -45,19 +60,42 @@ interface OnlineTableProps {
   toast: (message: string) => void;
 }
 
+// Lo que se está arrastrando
+type DragSource =
+  | { kind: 'hand'; id: string; templateId: string; back: CardBackInfo }
+  | { kind: 'library'; back: CardBackInfo }
+  | { kind: 'play'; id: string; side: SideKey; card: OnlinePlayCard }
+  | { kind: 'graveyard'; id: string; side: SideKey; back: CardBackInfo }
+  | { kind: 'token'; id: string };
+
+interface DragState {
+  src: DragSource;
+  startX: number; // pantalla
+  startY: number;
+  grabX: number; // desplazamiento lógico desde la esquina del objeto
+  grabY: number;
+  x: number; // posición lógica del puntero
+  y: number;
+  moved: boolean;
+  shift: boolean;
+}
+
+const TOP_BAR_H = 52;
+const ZONE_LABEL: Record<ZoneKey, string> = { library: 'Biblioteca', hand: 'Mano', play: 'Zona de juego', graveyard: 'Cementerio' };
+
+const backKey = (b: CardBackInfo) => `${b.backType}-${b.deckId}`;
+
 export const OnlineTable: React.FC<OnlineTableProps> = ({
   state,
   status,
   library,
   serverUrl,
   send,
-  moveItems,
-  flushMoves,
   patchState,
-  shufflingIds,
   selectRequest,
   peek,
   onClosePeek,
+  onPeekTaken,
   reveal,
   onCloseReveal,
   onReloadLibrary,
@@ -70,68 +108,59 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
   const myInfo = state.players[me];
   const oppInfo = state.players[opp];
 
-  const [selectedCardIds, setSelectedCardIds] = useState<Set<string>>(new Set());
-  const [selectedCounterIds, setSelectedCounterIds] = useState<Set<string>>(new Set());
-  const [isBoardDragging, setIsBoardDragging] = useState(false);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [playFaceUp, setPlayFaceUp] = useState(true);
-  const [showLog, setShowLog] = useState(true);
+  const [showLog, setShowLog] = useState(false);
   const [chatText, setChatText] = useState('');
   const [seenLog, setSeenLog] = useState(state.log.length);
+  const [hoverTemplate, setHoverTemplate] = useState<{ cardId: string; templateId: string; side: 'left' | 'right' } | null>(null);
+  const [hoverHandId, setHoverHandId] = useState<string | null>(null);
+  const [drag, setDrag] = useState<DragState | null>(null);
+  const dragRef = useRef<DragState | null>(null);
 
-  const handBarRef = useRef<HTMLDivElement>(null);
-  const viewportRef = useRef<{ clientToBoard: (x: number, y: number) => Position } | null>(null);
+  const areaRef = useRef<HTMLDivElement>(null);
+  const boardRef = useRef<HTMLDivElement>(null);
   const logEndRef = useRef<HTMLDivElement>(null);
+  const [fit, setFit] = useState({ scale: 1, left: 0, top: 0 });
+
+  // ---------- Escalado: la mesa lógica 1600x900 ocupa todo lo posible ----------
+
+  useLayoutEffect(() => {
+    const el = areaRef.current;
+    if (!el) return;
+    const update = () => {
+      const w = el.clientWidth;
+      const h = el.clientHeight;
+      const scale = Math.min(w / BOARD_W, h / BOARD_H);
+      setFit({ scale, left: (w - BOARD_W * scale) / 2, top: (h - BOARD_H * scale) / 2 });
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const toBoard = useCallback(
+    (clientX: number, clientY: number) => {
+      const rect = boardRef.current?.getBoundingClientRect();
+      if (!rect) return { x: 0, y: 0 };
+      return { x: (clientX - rect.left) / fit.scale, y: (clientY - rect.top) / fit.scale };
+    },
+    [fit.scale],
+  );
 
   // ---------- Datos derivados ----------
 
-  const templates = useMemo(() => {
-    const list: CardTemplate[] = [...library.templates];
-    const hidden = new Set<string>();
-    const addHidden = (deckId: string, backType: 'backA' | 'backB') => {
-      const id = hiddenTemplateId(deckId, backType);
-      if (hidden.has(id)) return;
-      hidden.add(id);
-      list.push({ id, name: '', deckId, backType, quantity: 1, createdAt: 0 });
-    };
-    state.cards.forEach((c) => !c.templateId && addHidden(c.deckId, c.backType));
-    return list;
-  }, [library.templates, state.cards]);
-
-  const templateMap = useMemo(() => new Map(templates.map((t) => [t.id, t])), [templates]);
-
-  const boardCards: BoardCard[] = useMemo(
-    () =>
-      state.cards.map((c) => ({
-        id: c.id,
-        templateId: c.templateId ?? hiddenTemplateId(c.deckId, c.backType),
-        x: c.x,
-        y: c.y,
-        isFaceUp: c.isFaceUp,
-        rotation: c.rotation,
-        zIndex: c.zIndex,
-      })),
-    [state.cards],
-  );
-
-  // Quitar de la selección lo que ya no está en la mesa
-  useEffect(() => {
-    const ids = new Set(state.cards.map((c) => c.id));
-    setSelectedCardIds((prev) => {
-      const next = new Set([...prev].filter((id) => ids.has(id)));
-      return next.size === prev.size ? prev : next;
-    });
-    const cIds = new Set(state.counters.map((c) => c.id));
-    setSelectedCounterIds((prev) => {
-      const next = new Set([...prev].filter((id) => cIds.has(id)));
-      return next.size === prev.size ? prev : next;
-    });
-  }, [state.cards, state.counters]);
+  const templateMap = useMemo(() => new Map<string, CardTemplate>(library.templates.map((t) => [t.id, t])), [library.templates]);
+  const myPlay = state.me.play;
+  const selectedCard = myPlay.find((c) => c.id === selectedId) || null;
 
   useEffect(() => {
-    if (selectRequest) {
-      setSelectedCardIds(new Set(selectRequest));
-      setSelectedCounterIds(new Set());
-    }
+    if (selectedId && !myPlay.some((c) => c.id === selectedId)) setSelectedId(null);
+  }, [myPlay, selectedId]);
+
+  useEffect(() => {
+    if (selectRequest && selectRequest.length) setSelectedId(selectRequest[selectRequest.length - 1]);
   }, [selectRequest]);
 
   useEffect(() => {
@@ -141,86 +170,527 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
     }
   }, [state.log, showLog]);
 
-  // ---------- Acciones sobre la mesa ----------
+  // ---------- Acciones ----------
 
-  const selectedIds = () => [...selectedCardIds];
-
-  const bringToFront = (ids: string[], kind: 'card' | 'counter') => {
-    patchState((s) => {
-      let z = Math.max(0, ...s.cards.map((c) => c.zIndex), ...s.counters.map((c) => c.zIndex));
-      if (kind === 'card') {
-        const order = s.cards.filter((c) => ids.includes(c.id)).sort((a, b) => a.zIndex - b.zIndex);
-        const newZ = new Map(order.map((c) => [c.id, ++z]));
-        return { ...s, cards: s.cards.map((c) => (newZ.has(c.id) ? { ...c, zIndex: newZ.get(c.id)! } : c)) };
-      }
-      const order = s.counters.filter((c) => ids.includes(c.id)).sort((a, b) => a.zIndex - b.zIndex);
-      const newZ = new Map(order.map((c) => [c.id, ++z]));
-      return { ...s, counters: s.counters.map((c) => (newZ.has(c.id) ? { ...c, zIndex: newZ.get(c.id)! } : c)) };
-    });
-    send({ t: kind === 'card' ? 'front' : 'counterFront', ids });
+  const draw = () => send({ t: 'draw', count: 1 });
+  const flip = () => selectedCard && send({ t: 'flip', id: selectedCard.id });
+  const rotate = (deg: number) => selectedCard && send({ t: 'rotate', id: selectedCard.id, deg });
+  const moveSelected = (to: ZoneKey) => {
+    if (!selectedCard) return;
+    send({ t: 'move', id: selectedCard.id, to });
+    setSelectedId(null);
+  };
+  const setLife = (value: number) => {
+    const v = clamp(value, LIFE_MIN, LIFE_MAX);
+    patchState((s) => ({ ...s, life: { ...s.life, me: v } }));
+    send({ t: 'life', value: v });
+  };
+  const addToken = () => {
+    const r = zoneRect('me', 'play');
+    const n = state.tokens.length % 8;
+    send({ t: 'tokenAdd', x: r.x + r.w / 2 - TOKEN_SIZE / 2 + n * 12, y: r.y + 20 + n * 6 });
   };
 
-  const handleFlip = () => selectedCardIds.size && send({ t: 'flip', ids: selectedIds() });
-  const handleRotate = (deg: number) => selectedCardIds.size && send({ t: 'rotate', ids: selectedIds(), deg });
-  const handleShuffle = () => selectedCardIds.size > 1 && send({ t: 'shuffle', ids: selectedIds() });
-  const handleDelete = () => {
-    if (selectedCardIds.size === 0 && selectedCounterIds.size === 0) return;
-    send({ t: 'delete', cardIds: selectedIds(), counterIds: [...selectedCounterIds] });
-    setSelectedCardIds(new Set());
-    setSelectedCounterIds(new Set());
-  };
-  const handleToHand = () => selectedCardIds.size && send({ t: 'toHand', ids: selectedIds() });
-  const handleDraw = () => send({ t: 'draw', ids: selectedCardIds.size > 1 ? selectedIds() : [] });
-  const handlePeek = () => send({ t: 'peek', ids: selectedIds() });
-
-  const handleDoubleClickCard = (id: string) => {
-    const target = state.cards.find((c) => c.id === id);
-    if (!target) return;
-    setSelectedCardIds(new Set(state.cards.filter((c) => c.x === target.x && c.y === target.y).map((c) => c.id)));
-    setSelectedCounterIds(new Set());
-  };
-
-  const handleCardsDropped = (ids: string[], clientX: number, clientY: number) => {
-    const rect = handBarRef.current?.getBoundingClientRect();
-    if (!rect) return false;
-    const inside = clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom;
-    if (!inside) return false;
-    send({ t: 'toHand', ids });
-    return true;
-  };
-
-  const handleDragState = useCallback(
-    (dragging: boolean) => {
-      setIsBoardDragging(dragging);
-      if (!dragging) flushMoves();
-    },
-    [flushMoves],
-  );
-
-  const handlePlay = (id: string, clientX: number, clientY: number, faceUp: boolean) => {
-    const p = viewportRef.current?.clientToBoard(clientX, clientY) || { x: 500, y: 300 };
-    send({ t: 'play', id, x: p.x - 65, y: p.y - 103, faceUp });
-  };
-
-  const handleExtraKey = (key: string) => {
-    if (key === 'r') {
-      handleDraw();
-      return true;
-    }
-    if (key === 'h') {
-      handleToHand();
-      return true;
-    }
-    return false;
-  };
-
-  const sendChat = (e: React.FormEvent) => {
+  // Teclado
+  const keyRef = useRef<(e: KeyboardEvent) => void>(() => {});
+  keyRef.current = (e: KeyboardEvent) => {
+    const tag = (e.target as HTMLElement | null)?.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+    const k = e.key.toLowerCase();
+    if (k === 'r') draw();
+    else if (k === 'f') flip();
+    else if (k === 'q') rotate(-90);
+    else if (k === 'e') rotate(90);
+    else if (k === 'h') moveSelected('hand');
+    else if (k === 'g' || k === 'delete' || k === 'backspace') moveSelected('graveyard');
+    else if (k === 'escape') setSelectedId(null);
+    else return;
     e.preventDefault();
-    const text = chatText.trim();
-    if (!text) return;
-    send({ t: 'chat', text });
-    setChatText('');
   };
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => keyRef.current(e);
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
+
+  // ---------- Arrastrar ----------
+
+  const startDrag = (e: React.PointerEvent, src: DragSource, itemX: number, itemY: number) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const p = toBoard(e.clientX, e.clientY);
+    const d: DragState = { src, startX: e.clientX, startY: e.clientY, grabX: p.x - itemX, grabY: p.y - itemY, x: p.x, y: p.y, moved: false, shift: e.shiftKey };
+    dragRef.current = d;
+    setDrag(d);
+  };
+
+  const dropRef = useRef<(d: DragState) => void>(() => {});
+  dropRef.current = (d: DragState) => {
+    const { src } = d;
+    if (!d.moved) {
+      // Clic sin arrastrar
+      if (src.kind === 'library') draw();
+      else if (src.kind === 'play' && src.side === 'me') setSelectedId(src.id);
+      return;
+    }
+    const left = d.x - d.grabX;
+    const top = d.y - d.grabY;
+
+    if (src.kind === 'token') {
+      const x = clamp(left, 0, BOARD_W - TOKEN_SIZE);
+      const y = clamp(top, 0, BOARD_H - TOKEN_SIZE);
+      patchState((s) => ({ ...s, tokens: s.tokens.map((t) => (t.id === src.id ? { ...t, x, y } : t)) }));
+      send({ t: 'tokenMove', id: src.id, x, y });
+      return;
+    }
+
+    const zones: ZoneKey[] = ['play', 'hand', 'graveyard', 'library'];
+    const to = zones.find((z) => inRect(zoneRect('me', z), d.x, d.y));
+    if (!to) return; // fuera de tus zonas: la carta vuelve a su sitio
+
+    const ref = src.kind === 'library' ? { from: 'library' } : { id: src.id };
+
+    if (to === 'play') {
+      const r = zoneRect('me', 'play');
+      const x = clamp(left - r.x, 0, PLAY_W - CARD_W);
+      const y = clamp(top - r.y, 0, PLAY_H - CARD_H);
+      if (src.kind === 'play' && src.side === 'me') {
+        // Reordenar dentro de tu zona: se ve al instante
+        patchState((s) => ({
+          ...s,
+          me: { ...s.me, play: s.me.play.map((c) => (c.id === src.id ? { ...c, x, y, order: Math.max(0, ...s.me.play.map((k) => k.order)) + 1 } : c)) },
+        }));
+        setSelectedId(src.id);
+        send({ t: 'move', id: src.id, to: 'play', x, y });
+        return;
+      }
+      let faceUp: boolean | undefined;
+      if (src.kind === 'hand') faceUp = d.shift ? !playFaceUp : playFaceUp;
+      if (src.kind === 'library') faceUp = d.shift;
+      send({ t: 'move', ...ref, to: 'play', x, y, faceUp });
+      return;
+    }
+
+    if (to === 'hand' && src.kind === 'hand') {
+      // Reordenar la mano según dónde se suelte
+      const ids = state.hand.map((c) => c.id).filter((id) => id !== src.id);
+      const slots = handSlots(state.hand.length, zoneRect('me', 'hand'));
+      let index = slots.filter((sx) => sx + CARD_W / 2 < d.x).length;
+      index = clamp(index, 0, ids.length);
+      ids.splice(index, 0, src.id);
+      patchState((s) => ({ ...s, hand: ids.map((id) => s.hand.find((c) => c.id === id)!).filter(Boolean) }));
+      send({ t: 'handOrder', ids });
+      return;
+    }
+    if (to === 'graveyard' && src.kind === 'graveyard' && src.side === 'me') return;
+    if (to === 'library' && src.kind === 'library') return;
+    send({ t: 'move', ...ref, to });
+  };
+
+  const dragging = drag !== null;
+  useEffect(() => {
+    if (!dragging) return;
+    const move = (e: PointerEvent) => {
+      const d = dragRef.current;
+      if (!d) return;
+      const p = toBoard(e.clientX, e.clientY);
+      const moved = d.moved || Math.hypot(e.clientX - d.startX, e.clientY - d.startY) > 5;
+      const next = { ...d, x: p.x, y: p.y, moved, shift: e.shiftKey };
+      dragRef.current = next;
+      setDrag(next);
+    };
+    const up = (e: PointerEvent) => {
+      const d = dragRef.current;
+      dragRef.current = null;
+      setDrag(null);
+      if (d && e.type === 'pointerup') dropRef.current({ ...d, shift: e.shiftKey });
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', up);
+    return () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', up);
+    };
+  }, [dragging, toBoard]);
+
+  const isDragged = (kind: DragSource['kind'], id?: string) =>
+    !!drag && drag.moved && drag.src.kind === kind && (id === undefined || ('id' in drag.src && drag.src.id === id));
+
+  const showPreview = (cardId: string, templateId: string | undefined, boardX: number) => {
+    if (!templateId || drag) return;
+    setHoverTemplate({ cardId, templateId, side: boardX > BOARD_W / 2 ? 'left' : 'right' });
+  };
+  const hidePreview = () => setHoverTemplate(null);
+
+  // ---------- Pintado de cartas ----------
+
+  const cardImage = (templateId: string | undefined, back: CardBackInfo, faceUp: boolean) => {
+    const t = faceUp && templateId ? templateMap.get(templateId) : undefined;
+    if (t) {
+      return t.imageUrl ? (
+        <img src={t.imageUrl} alt={t.name} draggable={false} style={imgStyle} />
+      ) : (
+        <div style={{ ...imgStyle, background: '#0f172a', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, padding: 6, textAlign: 'center' }}>
+          {t.name}
+        </div>
+      );
+    }
+    const url = library.backs[backKey(back)];
+    return url ? (
+      <img src={url} alt="Reverso" draggable={false} style={imgStyle} />
+    ) : (
+      <div className="card-back-pattern" style={{ ...imgStyle }}>
+        <span className="card-back-logo" style={{ fontSize: 24 }}>
+          AD
+        </span>
+      </div>
+    );
+  };
+
+  const zoneBox = (side: SideKey, zone: ZoneKey, label: string) => {
+    const r = zoneRect(side, zone);
+    const target = !!drag && drag.moved && drag.src.kind !== 'token' && side === 'me';
+    return (
+      <div
+        key={`${side}-${zone}`}
+        style={{
+          position: 'absolute',
+          left: r.x + 4,
+          top: r.y + 4,
+          width: r.w - 8,
+          height: r.h - 8,
+          borderRadius: 14,
+          border: `2px ${target ? 'dashed' : 'solid'} ${target ? 'rgba(250, 204, 21, 0.7)' : side === 'me' ? 'rgba(129, 140, 248, 0.35)' : 'rgba(248, 113, 113, 0.3)'}`,
+          background: zone === 'play' ? (side === 'me' ? 'rgba(79, 70, 229, 0.07)' : 'rgba(220, 38, 38, 0.06)') : 'rgba(0, 0, 0, 0.22)',
+          pointerEvents: 'none',
+        }}
+      >
+        <span
+          style={{
+            position: 'absolute',
+            left: 10,
+            [side === 'me' ? 'top' : 'bottom']: 6,
+            fontSize: 13,
+            fontWeight: 600,
+            letterSpacing: 0.5,
+            textTransform: 'uppercase',
+            color: 'rgba(255,255,255,0.35)',
+          }}
+        >
+          {label}
+        </span>
+      </div>
+    );
+  };
+
+  // Biblioteca (montón boca abajo)
+  const libraryPile = (side: SideKey) => {
+    const lib = (side === 'me' ? state.me : state.opp).library;
+    const r = zoneRect(side, 'library');
+    const cx = r.x + (r.w - CARD_W) / 2;
+    const cy = r.y + (side === 'me' ? 26 : r.h - 26 - CARD_H);
+    const top = lib.top;
+    return (
+      <React.Fragment key={`lib-${side}`}>
+        {top && (
+          <div
+            title={side === 'me' ? 'Clic: robar · Arrastrar: coger la carta de arriba' : undefined}
+            onPointerDown={side === 'me' ? (e) => startDrag(e, { kind: 'library', back: top }, cx, cy) : undefined}
+            style={{
+              position: 'absolute',
+              left: cx,
+              top: cy,
+              width: CARD_W,
+              height: CARD_H,
+              cursor: side === 'me' ? 'grab' : 'default',
+              boxShadow: `${Math.min(lib.count, 8)}px ${Math.min(lib.count, 8)}px 0 rgba(0,0,0,0.45)`,
+              borderRadius: 8,
+              zIndex: 5,
+            }}
+          >
+            {cardImage(undefined, top, false)}
+          </div>
+        )}
+        <div style={{ ...pileCount, left: r.x + r.w - 46, top: side === 'me' ? r.y + 30 : r.y + r.h - 54 }}>{lib.count}</div>
+        {side === 'me' && (
+          <div style={{ position: 'absolute', left: r.x + r.w - 50, top: r.y + 64, display: 'flex', flexDirection: 'column', gap: 6, zIndex: 6 }}>
+            <button className="btn-secondary" style={pileBtn} title="Barajar tu biblioteca" onClick={() => send({ t: 'shuffleLibrary' })} disabled={!lib.count}>
+              <Shuffle size={16} />
+            </button>
+            <button className="btn-secondary" style={pileBtn} title="Mirar tu biblioteca (el rival verá que lo haces)" onClick={() => send({ t: 'peek', zone: 'library' })} disabled={!lib.count}>
+              <Search size={16} />
+            </button>
+          </div>
+        )}
+      </React.Fragment>
+    );
+  };
+
+  // Cementerio: boca abajo, girado 90º a la izquierda, la última arriba
+  const graveyardPile = (side: SideKey) => {
+    const list = (side === 'me' ? state.me : state.opp).graveyard;
+    const r = zoneRect(side, 'graveyard');
+    const shown = list.slice(-4);
+    // La carta girada ocupa 158x100: centrada en horizontal y pegada al lado del dueño
+    const centerY = side === 'me' ? r.y + 86 : r.y + r.h - 86;
+    const baseX = r.x + (r.w - CARD_W) / 2;
+    const baseY = centerY - CARD_H / 2;
+    return (
+      <React.Fragment key={`grave-${side}`}>
+        {shown.map((c, i) => {
+          const isTop = i === shown.length - 1;
+          const x = baseX + i * 3;
+          const y = baseY - i * 3;
+          return (
+            <div
+              key={c.id}
+              onPointerDown={isTop ? (e) => startDrag(e, { kind: 'graveyard', id: c.id, side, back: c }, x, y) : undefined}
+              title={isTop ? 'Arrastra la carta de arriba para cogerla' : undefined}
+              style={{
+                position: 'absolute',
+                left: x,
+                top: y,
+                width: CARD_W,
+                height: CARD_H,
+                transform: 'rotate(-90deg)',
+                borderRadius: 8,
+                cursor: isTop ? 'grab' : 'default',
+                opacity: isTop && isDragged('graveyard', c.id) ? 0.25 : 1,
+                boxShadow: '0 2px 6px rgba(0,0,0,0.5)',
+                zIndex: 5 + i,
+              }}
+            >
+              {cardImage(undefined, c, false)}
+            </div>
+          );
+        })}
+        <div style={{ ...pileCount, left: r.x + 14, top: side === 'me' ? r.y + 146 : r.y + 18 }}>{list.length}</div>
+        {side === 'me' && list.length > 0 && (
+          <button
+            className="btn-secondary"
+            style={{ ...pileBtn, position: 'absolute', left: r.x + r.w - 50, top: r.y + 142, zIndex: 12 }}
+            title="Ver tu cementerio (el rival verá que lo haces)"
+            onClick={() => send({ t: 'peek', zone: 'graveyard' })}
+          >
+            <Search size={16} />
+          </button>
+        )}
+      </React.Fragment>
+    );
+  };
+
+  const playCards = (side: SideKey) =>
+    (side === 'me' ? state.me : state.opp).play.map((c) => {
+      const pos = playCardPos(side, c.x, c.y);
+      const selected = side === 'me' && c.id === selectedId;
+      return (
+        <div
+          key={c.id}
+          onPointerDown={(e) => startDrag(e, { kind: 'play', id: c.id, side, card: c }, pos.x, pos.y)}
+          onPointerEnter={() => c.isFaceUp && showPreview(c.id, c.templateId, pos.x)}
+          onPointerLeave={hidePreview}
+          onDoubleClick={() => side === 'me' && send({ t: 'flip', id: c.id })}
+          style={{
+            position: 'absolute',
+            left: pos.x,
+            top: pos.y,
+            width: CARD_W,
+            height: CARD_H,
+            transform: `rotate(${c.rotation}deg)`,
+            transition: 'transform 0.15s ease',
+            borderRadius: 8,
+            zIndex: 20 + (c.order % 100000),
+            cursor: 'grab',
+            opacity: isDragged('play', c.id) ? 0.25 : 1,
+            boxShadow: selected ? '0 0 0 3px #facc15, 0 6px 16px rgba(0,0,0,0.6)' : '0 4px 10px rgba(0,0,0,0.5)',
+          }}
+        >
+          {cardImage(c.templateId, c, c.isFaceUp)}
+        </div>
+      );
+    });
+
+  const myHand = () => {
+    const r = zoneRect('me', 'hand');
+    const slots = handSlots(state.hand.length, r);
+    const y = r.y + (r.h - CARD_H) / 2 + 6;
+    return state.hand.map((c, i) => {
+      const hovered = hoverHandId === c.id && !drag;
+      return (
+        <div
+          key={c.id}
+          onPointerDown={(e) => startDrag(e, { kind: 'hand', id: c.id, templateId: c.templateId, back: c }, slots[i], y)}
+          onPointerEnter={() => {
+            setHoverHandId(c.id);
+            showPreview(c.id, c.templateId, slots[i]);
+          }}
+          onPointerLeave={() => {
+            setHoverHandId((h) => (h === c.id ? null : h));
+            hidePreview();
+          }}
+          style={{
+            position: 'absolute',
+            left: slots[i],
+            top: y - (hovered ? 14 : 0),
+            width: CARD_W,
+            height: CARD_H,
+            borderRadius: 8,
+            zIndex: hovered ? 900 : 300 + i,
+            cursor: 'grab',
+            transition: 'top 0.12s ease',
+            opacity: isDragged('hand', c.id) ? 0.25 : 1,
+            boxShadow: '0 4px 10px rgba(0,0,0,0.55)',
+          }}
+        >
+          {cardImage(c.templateId, c, true)}
+          {hovered && (
+            <button
+              className="btn-secondary"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={() => send({ t: 'reveal', id: c.id })}
+              title="Enseñar esta carta al rival sin jugarla"
+              style={{ position: 'absolute', left: '50%', bottom: -2, transform: 'translate(-50%, 50%)', padding: '3px 8px', fontSize: 12 }}
+            >
+              <Eye size={12} /> Enseñar
+            </button>
+          )}
+        </div>
+      );
+    });
+  };
+
+  const oppHand = () => {
+    const r = zoneRect('opp', 'hand');
+    const slots = handSlots(state.oppHand.length, r);
+    const y = r.y + (r.h - CARD_H) / 2 - 6;
+    return state.oppHand.map((c, i) => (
+      <div key={i} style={{ position: 'absolute', left: slots[i], top: y, width: CARD_W, height: CARD_H, zIndex: 300 + i, borderRadius: 8, boxShadow: '0 4px 10px rgba(0,0,0,0.5)' }}>
+        {cardImage(undefined, c, false)}
+      </div>
+    ));
+  };
+
+  const lifePanel = (side: SideKey) => {
+    const mine = side === 'me';
+    const value = mine ? state.life.me : state.life.opp;
+    const info = mine ? myInfo : oppInfo;
+    const x = mine ? 0 : BOARD_W - SIDE_W;
+    const y = mine ? BOARD_H / 2 : 0;
+    return (
+      <div
+        key={`life-${side}`}
+        style={{
+          position: 'absolute',
+          left: x + 10,
+          top: y + 10,
+          width: SIDE_W - 20,
+          height: BOARD_H / 2 - 20,
+          borderRadius: 16,
+          background: mine ? 'rgba(79, 70, 229, 0.14)' : 'rgba(220, 38, 38, 0.12)',
+          border: `2px solid ${mine ? 'rgba(129, 140, 248, 0.4)' : 'rgba(248, 113, 113, 0.35)'}`,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 12,
+          color: '#fff',
+        }}
+      >
+        <div style={{ fontSize: 15, fontWeight: 600, textAlign: 'center', padding: '0 6px', wordBreak: 'break-word' }}>
+          {info ? info.name : 'Esperando rival…'}
+          {mine ? ' (tú)' : ''}
+        </div>
+        {info && !mine && (info.left || !info.connected) && (
+          <div style={{ fontSize: 12, color: 'var(--color-danger)' }}>{info.left ? 'ha salido' : 'desconectado'}</div>
+        )}
+        <div style={{ fontSize: 13, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 1 }}>Vida</div>
+        {mine && (
+          <button className="btn-secondary" style={lifeBtn} onClick={() => setLife(value + 1)} disabled={value >= LIFE_MAX} title="Sumar vida">
+            <Plus size={20} />
+          </button>
+        )}
+        <div style={{ fontSize: 64, fontWeight: 800, lineHeight: 1 }}>{value}</div>
+        {mine && (
+          <button className="btn-secondary" style={lifeBtn} onClick={() => setLife(value - 1)} disabled={value <= LIFE_MIN} title="Restar vida">
+            <Minus size={20} />
+          </button>
+        )}
+        <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{(mine ? state.hand.length : state.opp.handCount)} en mano</div>
+      </div>
+    );
+  };
+
+  // Fantasma de lo que se arrastra
+  const ghost = () => {
+    if (!drag || !drag.moved) return null;
+    const left = drag.x - drag.grabX;
+    const top = drag.y - drag.grabY;
+    const { src } = drag;
+    if (src.kind === 'token') return null;
+    let content: React.ReactNode;
+    let rotation = 0;
+    if (src.kind === 'hand') content = cardImage(src.templateId, src.back, drag.shift ? !playFaceUp : playFaceUp);
+    else if (src.kind === 'library') content = cardImage(undefined, src.back, false);
+    else if (src.kind === 'graveyard') content = cardImage(undefined, src.back, false);
+    else {
+      content = cardImage(src.card.templateId, src.card, src.card.isFaceUp);
+      rotation = src.card.rotation;
+    }
+    return (
+      <div
+        style={{
+          position: 'absolute',
+          left,
+          top,
+          width: CARD_W,
+          height: CARD_H,
+          zIndex: 500000,
+          pointerEvents: 'none',
+          transform: `rotate(${rotation}deg) scale(1.05)`,
+          borderRadius: 8,
+          boxShadow: '0 14px 30px rgba(0,0,0,0.7)',
+        }}
+      >
+        {content}
+      </div>
+    );
+  };
+
+  const tokens = state.tokens.map((t) => {
+    const dragged = drag && drag.moved && drag.src.kind === 'token' && drag.src.id === t.id;
+    const x = dragged ? clamp(drag.x - drag.grabX, 0, BOARD_W - TOKEN_SIZE) : t.x;
+    const y = dragged ? clamp(drag.y - drag.grabY, 0, BOARD_H - TOKEN_SIZE) : t.y;
+    return (
+      <div
+        key={t.id}
+        title="Token · arrastrar para mover · doble clic para quitar"
+        onPointerDown={(e) => startDrag(e, { kind: 'token', id: t.id }, t.x, t.y)}
+        onDoubleClick={() => send({ t: 'tokenDelete', id: t.id })}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          send({ t: 'tokenDelete', id: t.id });
+        }}
+        style={{
+          position: 'absolute',
+          left: x,
+          top: y,
+          width: TOKEN_SIZE,
+          height: TOKEN_SIZE,
+          borderRadius: '50%',
+          background: '#facc15',
+          border: '3px solid #000',
+          boxShadow: '0 3px 8px rgba(0,0,0,0.6)',
+          cursor: 'grab',
+          zIndex: 400000,
+        }}
+      />
+    );
+  });
+
+  // ---------- Barra superior ----------
 
   const copyInvite = async () => {
     const link = inviteLink(serverUrl, state.code);
@@ -232,234 +702,205 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
     }
   };
 
-  // ---------- Selección ----------
+  const sendChat = (e: React.FormEvent) => {
+    e.preventDefault();
+    const text = chatText.trim();
+    if (!text) return;
+    send({ t: 'chat', text });
+    setChatText('');
+  };
 
-  const selectedCards = state.cards.filter((c) => selectedCardIds.has(c.id));
-  const canPeek = selectedCards.length > 0 && selectedCards.every((c) => c.owner === me && !c.isFaceUp);
-  const hasSelection = selectedCardIds.size > 0 || selectedCounterIds.size > 0;
+  const myCardsInGame = state.me.library.count + state.hand.length + state.me.graveyard.length + state.me.play.length > 0;
   const unread = showLog ? 0 : Math.max(0, state.log.length - seenLog);
-  const myDeckOnTable = state.cards.some((c) => c.owner === me) || state.hand.length > 0;
-  const btn = { padding: '6px 12px', fontSize: '0.8rem' } as const;
+  const btn: React.CSSProperties = { padding: '6px 10px', fontSize: '0.78rem' };
+  // La vista ampliada solo se muestra si la carta sigue donde estaba (y boca arriba)
+  const hoverStillThere =
+    !!hoverTemplate &&
+    !drag &&
+    (state.hand.some((c) => c.id === hoverTemplate.cardId) ||
+      [...state.me.play, ...state.opp.play].some((c) => c.id === hoverTemplate.cardId && c.isFaceUp));
+  const previewTemplate = hoverStillThere ? templateMap.get(hoverTemplate!.templateId) : undefined;
 
   return (
-    <div style={{ width: '100vw', height: '100vh', position: 'relative', overflow: 'hidden' }}>
-      <Tabletop
-        cards={boardCards}
-        counters={state.counters}
-        templates={templates}
-        selectedCardIds={selectedCardIds}
-        selectedCounterIds={selectedCounterIds}
-        shufflingCardIds={shufflingIds}
-        backUrls={library.backs}
-        onSelectItems={(cards, counters) => {
-          setSelectedCardIds(cards);
-          setSelectedCounterIds(counters);
-        }}
-        onClearSelection={() => {
-          setSelectedCardIds(new Set());
-          setSelectedCounterIds(new Set());
-        }}
-        onUpdateCardPositions={(u) => moveItems('card', u)}
-        onUpdateCounterPositions={(u) => moveItems('counter', u)}
-        onUpdateCounterValue={(id, value) => {
-          patchState((s) => ({ ...s, counters: s.counters.map((c) => (c.id === id ? { ...c, value } : c)) }));
-          send({ t: 'counterValue', id, value });
-        }}
-        onUpdateCounterLabel={(id, label) => {
-          patchState((s) => ({ ...s, counters: s.counters.map((c) => (c.id === id ? { ...c, label } : c)) }));
-          send({ t: 'counterLabel', id, label });
-        }}
-        onUpdateCardsZIndex={(ids) => bringToFront(ids, 'card')}
-        onUpdateCountersZIndex={(ids) => bringToFront(ids, 'counter')}
-        onDoubleClickCard={handleDoubleClickCard}
-        onFlipSelected={handleFlip}
-        onRotateSelected={handleRotate}
-        onDeleteSelected={handleDelete}
-        onShuffleSelected={handleShuffle}
-        onCardsDropped={handleCardsDropped}
-        onDragStateChange={handleDragState}
-        onExtraKey={handleExtraKey}
-        viewportRef={viewportRef}
-      />
-
-      {/* Panel de la sala */}
+    <div style={{ width: '100vw', height: '100vh', display: 'flex', flexDirection: 'column', overflow: 'hidden', userSelect: 'none' }}>
+      {/* Barra superior */}
       <div
         className="glass-panel"
-        style={{ position: 'absolute', top: 12, left: 12, zIndex: 1006, width: 270, padding: 14, display: 'flex', flexDirection: 'column', gap: 10 }}
+        style={{
+          minHeight: TOP_BAR_H,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          padding: '6px 10px',
+          borderRadius: 0,
+          flexWrap: 'wrap',
+          zIndex: 10,
+          flexShrink: 0,
+        }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div>
-            <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Sala online</div>
-            <div style={{ fontSize: '1.3rem', fontWeight: 700, letterSpacing: '3px', color: '#fff' }}>{state.code}</div>
-          </div>
-          <button className="btn-secondary" onClick={copyInvite} title="Copiar enlace de invitación" style={{ padding: '6px 10px', fontSize: '0.75rem' }}>
-            <Copy size={13} /> Invitar
-          </button>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+          <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Sala</span>
+          <span style={{ fontSize: '1.1rem', fontWeight: 700, letterSpacing: 3 }}>{state.code}</span>
         </div>
-
-        {(['p1', 'p2'] as Seat[]).map((seat) => {
-          const p = state.players[seat];
-          return (
-            <div key={seat} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.8rem' }}>
-              <span
-                style={{
-                  width: 8,
-                  height: 8,
-                  borderRadius: '50%',
-                  background: p ? (p.connected ? 'var(--color-success)' : 'var(--color-danger)') : 'var(--text-muted)',
-                  flexShrink: 0,
-                }}
-              />
-              <span style={{ flex: 1, color: p ? '#fff' : 'var(--text-muted)' }}>
-                {p ? p.name : 'Esperando rival…'}
-                {seat === me ? ' (tú)' : ''}
-                {p && p.left ? ' · ha salido' : p && !p.connected ? ' · desconectado' : ''}
-              </span>
-              {p && <span style={{ color: 'var(--text-muted)', fontSize: '0.72rem' }}>{p.handCount} en mano</span>}
-            </div>
-          );
-        })}
-
-        <div style={{ height: 1, background: 'var(--glass-border)' }} />
-
-        <label style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Tu mazo</label>
-        <div style={{ display: 'flex', gap: 6 }}>
-          <select
-            value={myInfo?.deckId || ''}
-            onChange={(e) => send({ t: 'chooseDeck', deckId: e.target.value })}
-            style={{
-              flex: 1,
-              background: 'rgba(0,0,0,0.35)',
-              color: '#fff',
-              border: '1px solid var(--glass-border)',
-              borderRadius: 6,
-              padding: '6px',
-              fontSize: '0.8rem',
-              fontFamily: 'var(--font-family)',
-            }}
-          >
-            <option value="" disabled>
-              {Object.keys(library.deckNames).length ? 'Elige un mazo…' : 'No hay mazos publicados'}
+        <button className="btn-secondary" onClick={copyInvite} title="Copiar enlace de invitación" style={btn}>
+          <Copy size={13} /> Invitar
+        </button>
+        <div style={{ width: 1, height: 24, background: 'var(--glass-border)' }} />
+        <select
+          value={myInfo?.deckId || ''}
+          onChange={(e) => send({ t: 'chooseDeck', deckId: e.target.value })}
+          style={{
+            background: 'rgba(0,0,0,0.35)',
+            color: '#fff',
+            border: '1px solid var(--glass-border)',
+            borderRadius: 6,
+            padding: '6px',
+            fontSize: '0.78rem',
+            fontFamily: 'var(--font-family)',
+            maxWidth: 200,
+          }}
+        >
+          <option value="" disabled>
+            {Object.keys(library.deckNames).length ? 'Elige tu mazo…' : 'No hay mazos publicados'}
+          </option>
+          {Object.entries(library.deckNames).map(([id, name]) => (
+            <option key={id} value={id}>
+              {name} ({library.templates.filter((t) => t.deckId === id).reduce((s, t) => s + (t.quantity || 1), 0)})
             </option>
-            {Object.entries(library.deckNames).map(([id, name]) => (
-              <option key={id} value={id}>
-                {name} ({library.templates.filter((t) => t.deckId === id).reduce((s, t) => s + (t.quantity || 1), 0)})
-              </option>
-            ))}
-          </select>
-          <button className="btn-secondary" onClick={onReloadLibrary} title="Recargar mazos del servidor" style={{ padding: '6px 8px' }}>
-            <RefreshCw size={13} />
-          </button>
-        </div>
+          ))}
+        </select>
+        <button className="btn-secondary" onClick={onReloadLibrary} title="Recargar mazos del servidor" style={{ padding: '6px 8px' }}>
+          <RefreshCw size={13} />
+        </button>
         <button
           className="btn-primary"
           disabled={!myInfo?.deckId}
           onClick={() => {
             const doSpawn = () => send({ t: 'spawnDeck' });
-            if (myDeckOnTable) confirm('Poner otro mazo', 'Ya tienes cartas en juego. ¿Quieres añadir otra copia completa de tu mazo a la mesa?', doSpawn);
+            if (myCardsInGame)
+              confirm('Volver a poner el mazo', 'Se retirarán todas tus cartas (biblioteca, mano, mesa y cementerio) y tu mazo se barajará de nuevo en la biblioteca. ¿Seguro?', doSpawn);
             else doSpawn();
           }}
-          style={{ padding: '8px', fontSize: '0.8rem', opacity: myInfo?.deckId ? 1 : 0.5 }}
+          style={{ ...btn, opacity: myInfo?.deckId ? 1 : 0.5 }}
         >
-          <Layers size={14} /> Poner mi mazo barajado en la mesa
+          <Layers size={13} /> Poner mazo
         </button>
-        <div style={{ display: 'flex', gap: 6 }}>
-          <button className="btn-secondary" onClick={() => send({ t: 'counterAdd' })} style={{ flex: 1, padding: '6px', fontSize: '0.75rem' }}>
-            <UserPlus size={13} /> Contador
-          </button>
-          <button
-            className="btn-danger"
-            onClick={() =>
-              confirm('Reiniciar mesa', 'Se retirarán todas las cartas de la mesa y de las dos manos, y los contadores volverán a 10. ¿Seguro?', () =>
-                send({ t: 'reset' }),
-              )
-            }
-            style={{ flex: 1, padding: '6px', fontSize: '0.75rem' }}
-          >
-            Reiniciar mesa
-          </button>
-        </div>
-        <button className="btn-danger" onClick={onLeave} style={{ padding: '8px', fontSize: '0.8rem' }}>
-          <LogOut size={14} /> Salir de la partida
+        <button className="btn-secondary" onClick={() => setPlayFaceUp((v) => !v)} title="Cómo se juegan las cartas de la mano (Mayús al soltar lo invierte)" style={btn}>
+          {playFaceUp ? <Eye size={13} /> : <EyeOff size={13} />} {playFaceUp ? 'Jugar boca arriba' : 'Jugar boca abajo'}
         </button>
-        <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', lineHeight: 1.4 }}>
-          R: robar · H: a la mano · F: voltear · Q/E: rotar · Z: barajar · Doble clic: coger montón
-        </div>
+        <button className="btn-secondary" onClick={addToken} title="Añadir un token a la mesa" style={btn}>
+          <span style={{ width: 12, height: 12, borderRadius: '50%', background: '#facc15', border: '2px solid #000', display: 'inline-block' }} /> Token
+        </button>
+
+        {selectedCard && (
+          <>
+            <div style={{ width: 1, height: 24, background: 'var(--glass-border)' }} />
+            <button className="btn-secondary" onClick={flip} title="Voltear (F)" style={btn}>
+              <Eye size={13} /> Voltear
+            </button>
+            <button className="btn-secondary" onClick={() => rotate(-90)} title="Girar a la izquierda (Q)" style={btn}>
+              <RotateCcw size={13} />
+            </button>
+            <button className="btn-secondary" onClick={() => rotate(90)} title="Girar a la derecha (E)" style={btn}>
+              <RotateCw size={13} />
+            </button>
+            <button className="btn-secondary" onClick={() => moveSelected('hand')} title="A la mano (H)" style={btn}>
+              <Hand size={13} /> Mano
+            </button>
+            <button className="btn-secondary" onClick={() => moveSelected('graveyard')} title="Al cementerio (G)" style={btn}>
+              <Archive size={13} /> Cementerio
+            </button>
+          </>
+        )}
+
+        <div style={{ flex: 1 }} />
+        <button className="btn-secondary" onClick={() => setShowLog((v) => !v)} style={{ ...btn, position: 'relative' }}>
+          <MessageSquare size={13} /> Chat
+          {unread > 0 && <span style={{ marginLeft: 4, background: 'var(--color-accent)', borderRadius: 10, padding: '0 6px', fontSize: '0.7rem' }}>{unread}</span>}
+        </button>
+        <button
+          className="btn-secondary"
+          onClick={() =>
+            confirm('Reiniciar mesa', 'Se retirarán todas las cartas y tokens de los dos jugadores y las vidas volverán a 10. ¿Seguro?', () => send({ t: 'reset' }))
+          }
+          style={btn}
+        >
+          Reiniciar
+        </button>
+        <button className="btn-danger" onClick={onLeave} style={btn}>
+          <LogOut size={13} /> Salir
+        </button>
       </div>
 
-      {oppInfo && <OpponentHand name={oppInfo.name} cards={state.oppHand} backUrls={library.backs} />}
-
-      {/* Barra de acciones de la selección */}
-      {hasSelection && (
+      {/* Mesa escalada */}
+      <div ref={areaRef} style={{ flex: 1, position: 'relative', overflow: 'hidden' }} onPointerDown={() => setSelectedId(null)}>
         <div
-          className="glass-panel"
+          ref={boardRef}
           style={{
             position: 'absolute',
-            top: 112,
-            left: '50%',
-            transform: 'translateX(-50%)',
-            padding: '10px 16px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 10,
-            zIndex: 1003,
-            border: '1px solid rgba(255, 255, 255, 0.15)',
-            boxShadow: '0 10px 30px rgba(0,0,0,0.6)',
-            flexWrap: 'wrap',
-            justifyContent: 'center',
-            maxWidth: 'calc(100vw - 640px)',
+            left: fit.left,
+            top: fit.top,
+            width: BOARD_W,
+            height: BOARD_H,
+            transform: `scale(${fit.scale})`,
+            transformOrigin: '0 0',
+            background: 'radial-gradient(ellipse at center, #1b2440 0%, #0b1020 75%)',
+            borderRadius: 18,
+            boxShadow: '0 0 0 1px rgba(255,255,255,0.06)',
           }}
         >
-          <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-muted)' }}>
-            Selección:{' '}
-            <span style={{ color: '#fff' }}>
-              {selectedCardIds.size > 0 ? `${selectedCardIds.size} c.` : ''}
-              {selectedCardIds.size > 0 && selectedCounterIds.size > 0 ? ' + ' : ''}
-              {selectedCounterIds.size > 0 ? `${selectedCounterIds.size} cont.` : ''}
-            </span>
-          </div>
-          {selectedCardIds.size > 0 && (
-            <>
-              <button className="btn-secondary" onClick={handleFlip} title="Voltear (F)" style={btn}>
-                <Eye size={14} /> Voltear
-              </button>
-              <button className="btn-secondary" onClick={() => handleRotate(-90)} title="Rotar Izq. (Q)" style={btn}>
-                <RotateCcw size={14} />
-              </button>
-              <button className="btn-secondary" onClick={() => handleRotate(90)} title="Rotar Der. (E)" style={btn}>
-                <RotateCw size={14} />
-              </button>
-              {selectedCardIds.size > 1 && (
-                <button className="btn-secondary" onClick={handleShuffle} title="Barajar (Z)" style={btn}>
-                  <Shuffle size={14} /> Barajar
-                </button>
-              )}
-              {selectedCardIds.size > 1 && (
-                <button className="btn-secondary" onClick={handleDraw} title="Robar la carta de arriba (R)" style={btn}>
-                  Robar 1
-                </button>
-              )}
-              <button className="btn-secondary" onClick={handleToHand} title="Coger a la mano (H)" style={btn}>
-                <Hand size={14} /> A la mano
-              </button>
-              {canPeek && (
-                <button className="btn-secondary" onClick={handlePeek} title="Mirar en privado (el rival verá que lo haces)" style={btn}>
-                  <Search size={14} /> Mirar
-                </button>
-              )}
-            </>
+          {(['opp', 'me'] as SideKey[]).flatMap((side) =>
+            (['library', 'hand', 'graveyard', 'play'] as ZoneKey[]).map((zone) =>
+              zoneBox(side, zone, zone === 'play' ? `${ZONE_LABEL.play}${side === 'opp' && oppInfo ? ` · ${oppInfo.name}` : side === 'me' ? ' · tú' : ''}` : ZONE_LABEL[zone]),
+            ),
           )}
-          <div style={{ width: 1, height: 20, background: 'var(--glass-border)' }} />
-          <button className="btn-danger" onClick={handleDelete} title="Retirar de la mesa (Supr)" style={btn}>
-            <Trash2 size={14} />
-          </button>
+          <div style={{ position: 'absolute', left: SIDE_W, top: BOARD_H / 2 - 1, width: PLAY_W, height: 2, background: 'rgba(255,255,255,0.12)' }} />
+          {lifePanel('opp')}
+          {lifePanel('me')}
+          {libraryPile('opp')}
+          {libraryPile('me')}
+          {graveyardPile('opp')}
+          {graveyardPile('me')}
+          {oppHand()}
+          {myHand()}
+          {playCards('opp')}
+          {playCards('me')}
+          {tokens}
+          {ghost()}
+          {!myCardsInGame && (
+            <div style={{ position: 'absolute', left: SIDE_W, top: BOARD_H / 2 + 90, width: PLAY_W, textAlign: 'center', color: 'rgba(255,255,255,0.45)', fontSize: 20, pointerEvents: 'none' }}>
+              {myInfo?.deckId ? 'Pulsa "Poner mazo" para barajar tu mazo en la biblioteca' : 'Elige tu mazo arriba y pulsa "Poner mazo"'}
+            </div>
+          )}
         </div>
-      )}
 
-      {/* Registro de la partida y chat */}
-      <div style={{ position: 'absolute', top: 12, right: 12, zIndex: 1006, width: showLog ? 290 : 'auto' }}>
-        {showLog ? (
-          <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', height: 'min(460px, calc(100vh - 260px))' }}>
+        {/* Vista ampliada de la carta bajo el ratón */}
+        {previewTemplate?.imageUrl && (
+          <img
+            src={previewTemplate.imageUrl}
+            alt={previewTemplate.name}
+            style={{
+              position: 'absolute',
+              top: 12,
+              [hoverTemplate!.side]: 12,
+              height: 'min(480px, 62%)',
+              aspectRatio: `${CARD_W} / ${CARD_H}`,
+              objectFit: 'cover',
+              borderRadius: 14,
+              boxShadow: '0 20px 50px rgba(0,0,0,0.8)',
+              pointerEvents: 'none',
+              zIndex: 600000,
+            }}
+          />
+        )}
+
+        {/* Registro de la partida y chat */}
+        {showLog && (
+          <div
+            className="glass-panel"
+            onPointerDown={(e) => e.stopPropagation()}
+            style={{ position: 'absolute', top: 8, right: 8, width: 300, height: 'min(460px, calc(100% - 16px))', display: 'flex', flexDirection: 'column', zIndex: 700000 }}
+          >
             <div style={{ display: 'flex', alignItems: 'center', padding: '10px 12px', borderBottom: '1px solid var(--glass-border)', fontSize: '0.8rem', fontWeight: 600 }}>
               <MessageSquare size={14} style={{ marginRight: 6 }} />
               <span style={{ flex: 1 }}>Partida y chat</span>
@@ -467,7 +908,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
                 <X size={12} />
               </button>
             </div>
-            <div style={{ flex: 1, overflowY: 'auto', padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: 5 }}>
+            <div style={{ flex: 1, overflowY: 'auto', padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: 5, userSelect: 'text' }}>
               {state.log.map((entry) => (
                 <div
                   key={entry.id}
@@ -477,9 +918,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
                     color: entry.kind === 'chat' ? '#fff' : entry.kind === 'reveal' ? 'var(--color-accent)' : 'var(--text-muted)',
                   }}
                 >
-                  <span style={{ opacity: 0.5, marginRight: 4 }}>
-                    {new Date(entry.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  </span>
+                  <span style={{ opacity: 0.5, marginRight: 4 }}>{new Date(entry.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                   {entry.text}
                 </div>
               ))}
@@ -508,54 +947,36 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
               </button>
             </form>
           </div>
-        ) : (
-          <button className="btn-secondary glass-panel" onClick={() => setShowLog(true)} style={{ padding: '8px 12px', fontSize: '0.8rem', position: 'relative' }}>
-            <MessageSquare size={14} /> Partida y chat
-            {unread > 0 && (
-              <span style={{ marginLeft: 6, background: 'var(--color-accent)', borderRadius: 10, padding: '0 6px', fontSize: '0.7rem', color: '#fff' }}>{unread}</span>
-            )}
-          </button>
+        )}
+
+        {status === 'reconnecting' && (
+          <div
+            className="glass-panel"
+            style={{ position: 'absolute', top: '45%', left: '50%', transform: 'translate(-50%, -50%)', zIndex: 800000, padding: '14px 22px', fontSize: '0.9rem' }}
+          >
+            Conexión perdida. Reconectando…
+          </div>
         )}
       </div>
 
-      <HandBar
-        hand={state.hand}
-        templateMap={templateMap}
-        backUrls={library.backs}
-        barRef={handBarRef}
-        isBoardDragging={isBoardDragging}
-        playFaceUp={playFaceUp}
-        onTogglePlayFaceUp={() => setPlayFaceUp((v) => !v)}
-        onPlay={handlePlay}
-        onReveal={(id) => send({ t: 'reveal', id })}
-        onDraw={() => send({ t: 'draw', ids: [] })}
-      />
-
-      {status === 'reconnecting' && (
-        <div
-          className="glass-panel"
-          style={{ position: 'absolute', top: '45%', left: '50%', transform: 'translate(-50%, -50%)', zIndex: 300000, padding: '14px 22px', fontSize: '0.9rem' }}
-        >
-          Conexión perdida. Reconectando…
-        </div>
-      )}
-
-      {/* Mirar cartas propias boca abajo */}
+      {/* Mirar biblioteca o cementerio propios */}
       {peek && (
         <Overlay onClose={onClosePeek}>
-          <h3 style={{ fontSize: '1.05rem', fontWeight: 700, marginBottom: 4 }}>Mirando {peek.length} {peek.length === 1 ? 'carta' : 'cartas'} (de arriba a abajo)</h3>
+          <h3 style={{ fontSize: '1.05rem', fontWeight: 700, marginBottom: 4 }}>
+            {peek.zone === 'library' ? 'Tu biblioteca' : 'Tu cementerio'}: {peek.cards.length} {peek.cards.length === 1 ? 'carta' : 'cartas'} (de arriba a abajo)
+          </h3>
           <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 14 }}>
-            Solo tú las ves; tu rival sabe que las estás mirando. Puedes coger cualquiera a tu mano. Recuerda barajar después si corresponde.
+            Solo tú las ves; tu rival sabe que las estás mirando. Puedes coger cualquiera a tu mano.
           </p>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, maxHeight: '60vh', overflowY: 'auto', justifyContent: 'center' }}>
-            {peek.map((c) => {
+            {peek.cards.map((c) => {
               const t = templateMap.get(c.templateId);
               return (
                 <div key={c.id} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
                   {t?.imageUrl ? (
-                    <img src={t.imageUrl} alt={c.name} style={{ width: 130, height: 206, objectFit: 'cover', borderRadius: 10 }} />
+                    <img src={t.imageUrl} alt={c.name} style={{ width: 120, height: 190, objectFit: 'cover', borderRadius: 10 }} />
                   ) : (
-                    <div style={{ width: 130, height: 206, borderRadius: 10, background: '#0f172a', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem' }}>
+                    <div style={{ width: 120, height: 190, borderRadius: 10, background: '#0f172a', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem' }}>
                       {c.name}
                     </div>
                   )}
@@ -563,8 +984,8 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
                     className="btn-secondary"
                     style={{ padding: '4px 10px', fontSize: '0.72rem' }}
                     onClick={() => {
-                      send({ t: 'toHand', ids: [c.id] });
-                      onClosePeek();
+                      send({ t: 'takeFromPeek', id: c.id });
+                      onPeekTaken(c.id);
                     }}
                   >
                     <Hand size={12} /> A mi mano
@@ -573,6 +994,18 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
               );
             })}
           </div>
+          {peek.zone === 'library' && (
+            <button
+              className="btn-primary"
+              style={{ marginTop: 16, padding: '8px 16px', fontSize: '0.85rem' }}
+              onClick={() => {
+                send({ t: 'shuffleLibrary' });
+                onClosePeek();
+              }}
+            >
+              <Shuffle size={14} /> Barajar y cerrar
+            </button>
+          )}
         </Overlay>
       )}
 
@@ -591,6 +1024,43 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
   );
 };
 
+// Posiciones x de las cartas de una mano dentro de su zona (se solapan si no caben)
+function handSlots(n: number, r: Rect): number[] {
+  if (n === 0) return [];
+  const pad = 16;
+  const avail = r.w - pad * 2;
+  const step = n === 1 ? 0 : Math.min(CARD_W + 8, (avail - CARD_W) / (n - 1));
+  const total = CARD_W + step * (n - 1);
+  const start = r.x + (r.w - total) / 2;
+  return Array.from({ length: n }, (_, i) => start + i * step);
+}
+
+const imgStyle: React.CSSProperties = {
+  width: '100%',
+  height: '100%',
+  objectFit: 'cover',
+  borderRadius: 8,
+  display: 'block',
+  pointerEvents: 'none',
+};
+
+const pileCount: React.CSSProperties = {
+  position: 'absolute',
+  minWidth: 36,
+  padding: '2px 8px',
+  borderRadius: 12,
+  background: 'rgba(0,0,0,0.6)',
+  color: '#fff',
+  fontSize: 15,
+  fontWeight: 700,
+  textAlign: 'center',
+  zIndex: 15,
+  pointerEvents: 'none',
+};
+
+const pileBtn: React.CSSProperties = { padding: 6, width: 36, height: 36, justifyContent: 'center' };
+const lifeBtn: React.CSSProperties = { padding: 8, width: 52, height: 40, justifyContent: 'center' };
+
 const Overlay: React.FC<{ onClose: () => void; children: React.ReactNode }> = ({ onClose, children }) => (
   <div
     onPointerDown={onClose}
@@ -602,7 +1072,7 @@ const Overlay: React.FC<{ onClose: () => void; children: React.ReactNode }> = ({
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      zIndex: 400000,
+      zIndex: 900000,
     }}
   >
     <div

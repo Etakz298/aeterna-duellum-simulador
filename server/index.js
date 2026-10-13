@@ -357,13 +357,7 @@ wss.on('connection', (ws) => {
       }
       const result = room.game.apply(ws.seat, msg, library);
       if (result.private) send(ws, result.private);
-      // Los movimientos se envían en ligero al rival para no saturar la red
-      if (msg.t === 'move' || msg.t === 'counterMove') {
-        const other = ws.seat === 'p1' ? 'p2' : 'p1';
-        send(room.sockets[other], { t: msg.t === 'move' ? 'moved' : 'counterMoved', updates: msg.updates, rev: room.game.rev });
-      } else {
-        broadcastState(room, result.fx ? { ...result.fx, by: ws.seat } : undefined);
-      }
+      broadcastState(room, result.fx ? { ...result.fx, by: ws.seat } : undefined);
     } catch (err) {
       send(ws, { t: 'error', message: err instanceof Error ? err.message : 'Error' });
     }

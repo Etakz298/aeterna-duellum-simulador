@@ -1,10 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { OnlineState, PeekCard, StateEffects } from './types';
+import type { OnlineState, PeekResult, StateEffects } from './types';
 import { toWebSocketUrl } from './server';
 
 const SESSION_KEY = 'online_session';
-const MOVE_FLUSH_MS = 40;
-const LOCAL_MOVE_GRACE_MS = 1200;
 
 interface StoredSession {
   serverUrl: string;
@@ -36,7 +34,7 @@ type Entry = { t: 'create'; name: string } | { t: 'join'; code: string; name: st
 
 export function useOnlineGame(handlers: {
   onEffects?: (fx: StateEffects) => void;
-  onPeek?: (cards: PeekCard[]) => void;
+  onPeek?: (peek: PeekResult) => void;
   onError?: (message: string) => void;
 }) {
   const [status, setStatus] = useState<ConnectionStatus>('idle');
@@ -51,36 +49,9 @@ export function useOnlineGame(handlers: {
   const handlersRef = useRef(handlers);
   handlersRef.current = handlers;
 
-  // Movimientos locales pendientes (para no "saltar" atrás al recibir estado)
-  const pendingMoves = useRef(new Map<string, { x: number; y: number }>());
-  const pendingCounterMoves = useRef(new Map<string, { x: number; y: number }>());
-  const recentLocal = useRef(new Map<string, { x: number; y: number; at: number }>());
-  const flushTimer = useRef<number | undefined>(undefined);
-
   const rawSend = useCallback((msg: object) => {
     const ws = wsRef.current;
     if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
-  }, []);
-
-  const applyServerState = useCallback((incoming: OnlineState) => {
-    const now = Date.now();
-    const recent = recentLocal.current;
-    for (const [id, m] of recent) if (now - m.at > LOCAL_MOVE_GRACE_MS) recent.delete(id);
-    if (recent.size === 0) {
-      setState(incoming);
-      return;
-    }
-    setState({
-      ...incoming,
-      cards: incoming.cards.map((c) => {
-        const m = recent.get(c.id);
-        return m ? { ...c, x: m.x, y: m.y } : c;
-      }),
-      counters: incoming.counters.map((c) => {
-        const m = recent.get(c.id);
-        return m ? { ...c, x: m.x, y: m.y } : c;
-      }),
-    });
   }, []);
 
   const open = useCallback(
@@ -110,37 +81,11 @@ export function useOnlineGame(handlers: {
             break;
           }
           case 'state':
-            applyServerState(msg.state);
+            setState(msg.state);
             if (msg.fx) handlersRef.current.onEffects?.(msg.fx);
             break;
-          case 'moved':
-          case 'counterMoved': {
-            const map = new Map<string, { x: number; y: number }>(
-              (msg.updates || []).map((u: { id: string; x: number; y: number }) => [u.id, u]),
-            );
-            setState((prev) => {
-              if (!prev) return prev;
-              if (msg.t === 'moved') {
-                return {
-                  ...prev,
-                  cards: prev.cards.map((c) => {
-                    const u = map.get(c.id);
-                    return u ? { ...c, x: u.x, y: u.y } : c;
-                  }),
-                };
-              }
-              return {
-                ...prev,
-                counters: prev.counters.map((c) => {
-                  const u = map.get(c.id);
-                  return u ? { ...c, x: u.x, y: u.y } : c;
-                }),
-              };
-            });
-            break;
-          }
           case 'peek':
-            handlersRef.current.onPeek?.(msg.cards || []);
+            handlersRef.current.onPeek?.({ zone: msg.zone, cards: msg.cards || [] });
             break;
           case 'kicked':
             leavingRef.current = true;
@@ -177,7 +122,7 @@ export function useOnlineGame(handlers: {
         }
       };
     },
-    [applyServerState],
+    [],
   );
 
   const connect = useCallback(
@@ -211,55 +156,10 @@ export function useOnlineGame(handlers: {
     () => () => {
       leavingRef.current = true;
       window.clearTimeout(retryRef.current);
-      window.clearTimeout(flushTimer.current);
       wsRef.current?.close();
     },
     [],
   );
 
-  const flushMoves = useCallback(() => {
-    window.clearTimeout(flushTimer.current);
-    flushTimer.current = undefined;
-    if (pendingMoves.current.size) {
-      rawSend({ t: 'move', updates: [...pendingMoves.current].map(([id, p]) => ({ id, ...p })) });
-      pendingMoves.current.clear();
-    }
-    if (pendingCounterMoves.current.size) {
-      rawSend({ t: 'counterMove', updates: [...pendingCounterMoves.current].map(([id, p]) => ({ id, ...p })) });
-      pendingCounterMoves.current.clear();
-    }
-  }, [rawSend]);
-
-  // Movimiento local inmediato + envío agrupado al servidor
-  const moveItems = useCallback(
-    (kind: 'card' | 'counter', updates: { id: string; x: number; y: number }[]) => {
-      if (updates.length === 0) return;
-      const now = Date.now();
-      const map = new Map(updates.map((u) => [u.id, u]));
-      for (const u of updates) {
-        (kind === 'card' ? pendingMoves : pendingCounterMoves).current.set(u.id, { x: u.x, y: u.y });
-        recentLocal.current.set(u.id, { x: u.x, y: u.y, at: now });
-      }
-      setState((prev) => {
-        if (!prev) return prev;
-        if (kind === 'card') {
-          return { ...prev, cards: prev.cards.map((c) => (map.has(c.id) ? { ...c, ...map.get(c.id)! } : c)) };
-        }
-        return { ...prev, counters: prev.counters.map((c) => (map.has(c.id) ? { ...c, ...map.get(c.id)! } : c)) };
-      });
-      if (flushTimer.current === undefined) flushTimer.current = window.setTimeout(flushMoves, MOVE_FLUSH_MS);
-    },
-    [flushMoves],
-  );
-
-  // Cualquier otra acción: primero se envían los movimientos pendientes
-  const send = useCallback(
-    (msg: object) => {
-      flushMoves();
-      rawSend(msg);
-    },
-    [flushMoves, rawSend],
-  );
-
-  return { status, state, setState, fatalError, connect, leave, send, moveItems, flushMoves };
+  return { status, state, setState, fatalError, connect, leave, send: rawSend };
 }

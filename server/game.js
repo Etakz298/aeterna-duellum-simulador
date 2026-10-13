@@ -1,19 +1,36 @@
 // Estado autoritativo de una partida online 1 contra 1.
-// El servidor es el único que conoce qué carta es cada carta boca abajo y qué
-// hay en cada mano; a cada jugador solo se le envía su propia vista.
+// El servidor es el único que conoce qué carta es cada carta boca abajo, qué
+// hay en cada biblioteca y en cada mano; a cada jugador solo se le envía su vista.
+//
+// Cada jugador tiene sus zonas: biblioteca, mano, cementerio y zona de juego.
+// Las posiciones de la zona de juego se guardan relativas a esa zona y desde el
+// punto de vista de su dueño, así ambos jugadores ven la mesa igual sea cual sea
+// su resolución.
 
 import crypto from 'node:crypto';
 
 export const SEATS = ['p1', 'p2'];
 const LOG_LIMIT = 80;
 
-// Posiciones iniciales del mazo de cada jugador sobre la mesa
-const SPAWN = {
-  p1: { x: 260, y: 520 },
-  p2: { x: 1000, y: 150 },
-};
+// Medidas lógicas (deben coincidir con src/online/layout.ts)
+export const BOARD_W = 1600;
+export const BOARD_H = 900;
+export const PLAY_W = 1320;
+export const PLAY_H = 260;
+export const CARD_W = 100;
+export const CARD_H = 158;
+export const TOKEN_SIZE = 36;
+const LIFE_MIN = 0;
+const LIFE_MAX = 10;
+const LIFE_START = 10;
+
+const ZONES = ['library', 'hand', 'play', 'graveyard'];
+const ZONE_NAMES = { library: 'su biblioteca', hand: 'su mano', play: 'su zona de juego', graveyard: 'su cementerio' };
 
 const randomId = (prefix) => `${prefix}-${crypto.randomBytes(6).toString('hex')}`;
+const other = (seat) => (seat === 'p1' ? 'p2' : 'p1');
+const isNum = (n) => typeof n === 'number' && Number.isFinite(n);
+const clamp = (n, min, max) => Math.max(min, Math.min(max, n));
 
 function shuffleInPlace(arr) {
   for (let i = arr.length - 1; i > 0; i--) {
@@ -23,16 +40,16 @@ function shuffleInPlace(arr) {
   return arr;
 }
 
-const isNum = (n) => typeof n === 'number' && Number.isFinite(n);
-const clampCoord = (n) => Math.max(-2000, Math.min(7000, n));
-
 export class Game {
   constructor(code) {
     this.code = code;
-    this.players = {}; // seat -> { name, token, deckId, connected }
-    this.cards = new Map(); // id -> card (board o mano)
-    this.counters = [];
-    this.nextZ = 10;
+    this.players = {}; // seat -> { name, token, deckId, connected, left }
+    // Carta: { id, templateId, deckId, backType, isSpecial, owner, side, zone, order, x, y, isFaceUp, rotation }
+    // owner = de quién es el mazo; side = en las zonas de qué jugador está
+    this.cards = new Map();
+    this.life = { p1: LIFE_START, p2: LIFE_START };
+    this.tokens = []; // { id, x, y } en coordenadas del tablero vistas por p1
+    this.seq = 0;
     this.log = [];
     this.rev = 0;
     this.lastActivity = Date.now();
@@ -45,18 +62,6 @@ export class Game {
     if (!seat) return null;
     const token = crypto.randomBytes(16).toString('hex');
     this.players[seat] = { name, token, deckId: null, connected: false };
-
-    // Contador de vida propio para cada jugador
-    this.nextZ++;
-    this.counters.push({
-      id: randomId('counter'),
-      x: seat === 'p1' ? 100 : 820,
-      y: seat === 'p1' ? 520 : 180,
-      value: 10,
-      label: name.slice(0, 12).toUpperCase(),
-      zIndex: this.nextZ,
-    });
-
     this.addLog(`${name} se ha unido a la sala.`);
     return { seat, token };
   }
@@ -74,77 +79,24 @@ export class Game {
     if (this.log.length > LOG_LIMIT) this.log.splice(0, this.log.length - LOG_LIMIT);
   }
 
-  // ---------- Vista por jugador ----------
-
-  viewFor(seat) {
-    const other = seat === 'p1' ? 'p2' : 'p1';
-    const board = [];
-    const hand = [];
-    const oppHand = [];
-
-    for (const c of this.cards.values()) {
-      if (c.zone === 'board') {
-        const base = {
-          id: c.id,
-          owner: c.owner,
-          deckId: c.deckId,
-          backType: c.backType,
-          x: c.x,
-          y: c.y,
-          isFaceUp: c.isFaceUp,
-          rotation: c.rotation,
-          zIndex: c.zIndex,
-        };
-        // Las cartas boca abajo no revelan su diseño a ningún cliente
-        if (c.isFaceUp) base.templateId = c.templateId;
-        board.push(base);
-      } else if (c.zone === 'hand' && c.owner === seat) {
-        hand.push({ id: c.id, templateId: c.templateId, deckId: c.deckId, backType: c.backType, order: c.order });
-      } else if (c.zone === 'hand' && c.owner === other) {
-        // Del rival solo se envía el reverso: ni id ni diseño
-        oppHand.push({ deckId: c.deckId, backType: c.backType, order: c.order });
-      }
-    }
-
-    hand.sort((a, b) => a.order - b.order);
-    oppHand.sort((a, b) => a.order - b.order);
-
-    const players = {};
-    for (const s of SEATS) {
-      const p = this.players[s];
-      if (!p) continue;
-      players[s] = {
-        name: p.name,
-        connected: p.connected,
-        deckId: p.deckId,
-        handCount: [...this.cards.values()].filter((c) => c.zone === 'hand' && c.owner === s).length,
-        left: !!p.left,
-      };
-    }
-
-    return {
-      code: this.code,
-      you: seat,
-      rev: this.rev,
-      players,
-      cards: board,
-      hand: hand.map(({ order: _o, ...rest }) => rest),
-      oppHand: oppHand.map(({ order: _o, ...rest }) => rest),
-      counters: this.counters,
-      log: this.log,
-    };
-  }
-
-  // ---------- Utilidades internas ----------
-
-  boardCards(ids) {
-    const set = new Set(Array.isArray(ids) ? ids : []);
-    return [...this.cards.values()].filter((c) => c.zone === 'board' && set.has(c.id));
-  }
-
   bump() {
     this.rev++;
     this.lastActivity = Date.now();
+  }
+
+  // ---------- Consultas internas ----------
+
+  zoneCards(side, zone) {
+    return [...this.cards.values()].filter((c) => c.side === side && c.zone === zone).sort((a, b) => a.order - b.order);
+  }
+
+  topOf(side, zone) {
+    const list = this.zoneCards(side, zone);
+    return list[list.length - 1] || null;
+  }
+
+  nextOrder() {
+    return ++this.seq;
   }
 
   // Cambia el id de una carta para que no se pueda seguir su rastro
@@ -155,14 +107,64 @@ export class Game {
     return card;
   }
 
-  nextHandOrder(seat) {
-    let max = 0;
-    for (const c of this.cards.values()) if (c.zone === 'hand' && c.owner === seat) max = Math.max(max, c.order || 0);
-    return max + 1;
+  // Ordena la biblioteca: barajada y con las especiales siempre arriba
+  shuffleLibrary(side) {
+    const list = shuffleInPlace(this.zoneCards(side, 'library'));
+    list.sort((a, b) => Number(!!a.isSpecial) - Number(!!b.isSpecial));
+    for (const c of list) {
+      c.order = this.nextOrder();
+      this.reId(c);
+    }
+    return list.length;
+  }
+
+  // ---------- Vista por jugador ----------
+
+  viewFor(seat) {
+    const opp = other(seat);
+    const sideView = (side) => {
+      const library = this.zoneCards(side, 'library');
+      const top = library[library.length - 1];
+      const hand = this.zoneCards(side, 'hand');
+      return {
+        library: { count: library.length, top: top ? { deckId: top.deckId, backType: top.backType } : null },
+        // El cementerio está boca abajo: solo se envía el reverso
+        graveyard: this.zoneCards(side, 'graveyard').map((c) => ({ id: c.id, deckId: c.deckId, backType: c.backType })),
+        play: this.zoneCards(side, 'play').map((c) => {
+          const v = { id: c.id, owner: c.owner, deckId: c.deckId, backType: c.backType, x: c.x, y: c.y, isFaceUp: c.isFaceUp, rotation: c.rotation, order: c.order };
+          if (c.isFaceUp) v.templateId = c.templateId;
+          return v;
+        }),
+        handCount: hand.length,
+      };
+    };
+
+    const players = {};
+    for (const s of SEATS) {
+      const p = this.players[s];
+      if (p) players[s] = { name: p.name, connected: p.connected, deckId: p.deckId, left: !!p.left };
+    }
+
+    return {
+      code: this.code,
+      you: seat,
+      rev: this.rev,
+      players,
+      me: sideView(seat),
+      opp: sideView(opp),
+      hand: this.zoneCards(seat, 'hand').map((c) => ({ id: c.id, templateId: c.templateId, deckId: c.deckId, backType: c.backType })),
+      oppHand: this.zoneCards(opp, 'hand').map((c) => ({ deckId: c.deckId, backType: c.backType })),
+      life: { me: this.life[seat], opp: this.life[opp] },
+      // Los tokens se guardan vistos por p1; a p2 se le dan girados 180º
+      tokens: this.tokens.map((t) =>
+        seat === 'p1' ? t : { id: t.id, x: BOARD_W - TOKEN_SIZE - t.x, y: BOARD_H - TOKEN_SIZE - t.y },
+      ),
+      log: this.log,
+    };
   }
 
   // ---------- Acciones ----------
-  // Cada acción devuelve { ok, fx?, private? } o lanza un Error con mensaje para el usuario.
+  // Cada acción devuelve { fx?, private? } o lanza un Error con un mensaje para el usuario.
 
   apply(seat, msg, library) {
     const fn = this[`act_${msg.t}`];
@@ -179,260 +181,236 @@ export class Game {
     this.addLog(`${this.nameOf(seat)} ha elegido el mazo "${library.deckNames[deckId]}".`);
   }
 
+  // Pone el mazo elegido en la biblioteca (sustituye las cartas propias que hubiera)
   act_spawnDeck(seat, _msg, library) {
     const deckId = this.players[seat].deckId;
     if (!deckId) throw new Error('Elige primero un mazo');
     const templates = library.templates.filter((t) => t.deckId === deckId);
     if (templates.length === 0) throw new Error('El mazo elegido está vacío');
 
-    const pile = [];
+    for (const c of [...this.cards.values()]) if (c.owner === seat) this.cards.delete(c.id);
+
+    let n = 0;
     for (const t of templates) {
-      const qty = Math.max(1, Math.min(60, Number(t.quantity) || 1));
-      for (let i = 0; i < qty; i++) pile.push(t);
+      const qty = clamp(Number(t.quantity) || 1, 1, 60);
+      for (let i = 0; i < qty; i++) {
+        const card = {
+          id: randomId('card'),
+          templateId: t.id,
+          deckId: t.deckId,
+          backType: t.backType === 'backB' ? 'backB' : 'backA',
+          isSpecial: !!t.isSpecial,
+          owner: seat,
+          side: seat,
+          zone: 'library',
+          order: 0,
+          x: 0,
+          y: 0,
+          isFaceUp: false,
+          rotation: 0,
+        };
+        this.cards.set(card.id, card);
+        n++;
+      }
     }
-    shuffleInPlace(pile);
-    // Las cartas especiales van siempre arriba del mazo (las últimas en apilarse)
-    pile.sort((a, b) => Number(!!a.isSpecial) - Number(!!b.isSpecial));
-
-    const { x, y } = SPAWN[seat];
-    const ids = [];
-    for (const t of pile) {
-      this.nextZ++;
-      const card = {
-        id: randomId('card'),
-        templateId: t.id,
-        deckId: t.deckId,
-        backType: t.backType === 'backB' ? 'backB' : 'backA',
-        owner: seat,
-        zone: 'board',
-        x,
-        y,
-        isFaceUp: false,
-        rotation: 0,
-        zIndex: this.nextZ,
-      };
-      this.cards.set(card.id, card);
-      ids.push(card.id);
-    }
-    this.addLog(`${this.nameOf(seat)} ha puesto su mazo barajado en la mesa (${pile.length} cartas).`);
-    return { fx: { shuffle: ids } };
+    this.shuffleLibrary(seat);
+    this.addLog(`${this.nameOf(seat)} ha puesto su mazo barajado en la biblioteca (${n} cartas).`);
   }
 
-  act_move(_seat, msg) {
-    const updates = Array.isArray(msg.updates) ? msg.updates.slice(0, 300) : [];
-    for (const u of updates) {
-      const c = this.cards.get(u?.id);
-      if (!c || c.zone !== 'board' || !isNum(u.x) || !isNum(u.y)) continue;
-      c.x = clampCoord(u.x);
-      c.y = clampCoord(u.y);
+  act_draw(seat, msg) {
+    const count = clamp(Number(msg.count) || 1, 1, 10);
+    let n = 0;
+    for (let i = 0; i < count; i++) {
+      const top = this.topOf(seat, 'library');
+      if (!top) break;
+      this.place(top, seat, 'hand');
+      n++;
     }
+    if (n === 0) throw new Error('Tu biblioteca está vacía');
+    this.addLog(`${this.nameOf(seat)} ha robado ${n === 1 ? 'una carta' : `${n} cartas`}.`);
   }
 
-  act_front(_seat, msg) {
-    const list = this.boardCards(msg.ids).sort((a, b) => a.zIndex - b.zIndex);
-    for (const c of list) c.zIndex = ++this.nextZ;
+  act_shuffleLibrary(seat) {
+    const n = this.shuffleLibrary(seat);
+    if (n) this.addLog(`${this.nameOf(seat)} ha barajado su biblioteca.`);
+  }
+
+  // Coloca una carta en una zona del jugador `side`
+  place(card, side, zone, opts = {}) {
+    card.side = side;
+    card.zone = zone;
+    card.order = this.nextOrder();
+    if (zone === 'hand' || zone === 'library') {
+      card.isFaceUp = false;
+      card.rotation = 0;
+    } else if (zone === 'graveyard') {
+      // En el cementerio: boca abajo y girada 90º a la izquierda
+      card.isFaceUp = false;
+      card.rotation = -90;
+    } else if (zone === 'play') {
+      card.x = clamp(isNum(opts.x) ? opts.x : (PLAY_W - CARD_W) / 2, 0, PLAY_W - CARD_W);
+      card.y = clamp(isNum(opts.y) ? opts.y : (PLAY_H - CARD_H) / 2, 0, PLAY_H - CARD_H);
+      if (typeof opts.faceUp === 'boolean') card.isFaceUp = opts.faceUp;
+      if (opts.resetRotation) card.rotation = 0;
+    }
+    this.reId(card);
+    return card;
+  }
+
+  // Mover una carta: de cualquier zona pública (o de las propias ocultas) a una zona propia.
+  // Solo se puede llevar a tus zonas; así se puede "robar" una carta del rival
+  // a tu mano, zona de juego o cementerio, pero nunca sacarla de las zonas.
+  act_move(seat, msg) {
+    const to = String(msg.to || '');
+    if (!ZONES.includes(to)) throw new Error('Zona no válida');
+
+    let card;
+    if (msg.from === 'library') {
+      card = this.topOf(seat, 'library');
+      if (!card) throw new Error('Tu biblioteca está vacía');
+    } else {
+      card = this.cards.get(msg.id);
+      if (!card) throw new Error('Esa carta ya no está ahí');
+      const own = card.side === seat;
+      const publicZone = card.zone === 'play' || card.zone === 'graveyard';
+      if (!own && !publicZone) throw new Error('No puedes coger esa carta');
+      if (card.zone === 'library') throw new Error('Coge las cartas de la biblioteca desde arriba');
+    }
+
+    const fromZone = card.zone;
+    const fromSide = card.side;
+
+    // Reordenar dentro de tu propia zona de juego
+    if (fromZone === 'play' && to === 'play' && fromSide === seat) {
+      card.x = clamp(isNum(msg.x) ? msg.x : card.x, 0, PLAY_W - CARD_W);
+      card.y = clamp(isNum(msg.y) ? msg.y : card.y, 0, PLAY_H - CARD_H);
+      card.order = this.nextOrder();
+      return { fx: { select: [card.id], by: seat } };
+    }
+
+    let faceUp;
+    if (to === 'play') {
+      if (fromZone === 'hand') faceUp = msg.faceUp !== false;
+      else if (fromZone === 'library') faceUp = msg.faceUp === true;
+      else if (fromZone === 'graveyard') faceUp = msg.faceUp !== false;
+      else faceUp = card.isFaceUp;
+    }
+    this.place(card, seat, to, { x: msg.x, y: msg.y, faceUp, resetRotation: fromZone !== 'play' });
+
+    // Registro
+    const who = this.nameOf(seat);
+    const fromText =
+      fromSide === seat
+        ? { library: 'de su biblioteca', hand: 'de su mano', play: 'de su zona de juego', graveyard: 'de su cementerio' }[fromZone]
+        : { play: `de la zona de juego de ${this.nameOf(fromSide)}`, graveyard: `del cementerio de ${this.nameOf(fromSide)}` }[fromZone];
+    let what = 'una carta';
+    if (to === 'play' && card.isFaceUp) what = 'una carta boca arriba';
+    if (to === 'play' && !card.isFaceUp) what = 'una carta boca abajo';
+    this.addLog(`${who} ha movido ${what} ${fromText} a ${ZONE_NAMES[to]}.`);
+    return { fx: to === 'play' ? { select: [card.id], by: seat } : undefined };
   }
 
   act_flip(seat, msg) {
-    const list = this.boardCards(msg.ids);
-    for (const c of list) c.isFaceUp = !c.isFaceUp;
-    if (list.length) this.addLog(`${this.nameOf(seat)} ha volteado ${list.length === 1 ? 'una carta' : `${list.length} cartas`}.`);
-  }
-
-  act_rotate(_seat, msg) {
-    const deg = msg.deg === -90 ? -90 : 90;
-    for (const c of this.boardCards(msg.ids)) c.rotation += deg;
-  }
-
-  act_shuffle(seat, msg) {
-    const list = this.boardCards(msg.ids);
-    if (list.length <= 1) return {};
-    const avgX = list.reduce((s, c) => s + c.x, 0) / list.length;
-    const avgY = list.reduce((s, c) => s + c.y, 0) / list.length;
-    shuffleInPlace(list);
-    const ids = [];
-    for (const c of list) {
-      c.x = avgX;
-      c.y = avgY;
-      c.zIndex = ++this.nextZ;
-      this.reId(c);
-      ids.push(c.id);
-    }
-    this.addLog(`${this.nameOf(seat)} ha barajado ${list.length} cartas.`);
-    return { fx: { shuffle: ids, select: ids } };
-  }
-
-  act_delete(seat, msg) {
-    const cards = this.boardCards(msg.cardIds);
-    for (const c of cards) this.cards.delete(c.id);
-    const counterIds = new Set(Array.isArray(msg.counterIds) ? msg.counterIds : []);
-    const before = this.counters.length;
-    this.counters = this.counters.filter((c) => !counterIds.has(c.id));
-    const removedCounters = before - this.counters.length;
-    if (cards.length || removedCounters) {
-      const parts = [];
-      if (cards.length) parts.push(cards.length === 1 ? 'una carta' : `${cards.length} cartas`);
-      if (removedCounters) parts.push(removedCounters === 1 ? 'un contador' : `${removedCounters} contadores`);
-      this.addLog(`${this.nameOf(seat)} ha retirado de la mesa ${parts.join(' y ')}.`);
-    }
-  }
-
-  // Mover cartas concretas de la mesa a la mano
-  act_toHand(seat, msg) {
-    const list = this.boardCards(msg.ids).sort((a, b) => b.zIndex - a.zIndex);
-    if (list.length === 0) return {};
-    const faceDown = list.filter((c) => !c.isFaceUp).length;
-    let order = this.nextHandOrder(seat);
-    for (const c of list) {
-      c.zone = 'hand';
-      c.owner = seat;
-      c.order = order++;
-      c.isFaceUp = false;
-      c.rotation = 0;
-      this.reId(c);
-    }
-    const n = list.length;
-    const visible = n - faceDown;
-    let text = `${this.nameOf(seat)} ha cogido ${n === 1 ? 'una carta' : `${n} cartas`} a su mano`;
-    if (visible > 0) text += visible === n ? ' (estaban boca arriba)' : ` (${visible} boca arriba)`;
-    this.addLog(`${text}.`);
-    return {};
-  }
-
-  // Robar la carta superior de un montón (o del mazo propio si no se indica)
-  act_draw(seat, msg) {
-    let pile;
-    if (Array.isArray(msg.ids) && msg.ids.length > 0) {
-      pile = this.boardCards(msg.ids);
-    } else {
-      // Montón boca abajo más grande del jugador
-      const groups = new Map();
-      for (const c of this.cards.values()) {
-        if (c.zone !== 'board' || c.owner !== seat || c.isFaceUp) continue;
-        const key = `${c.x},${c.y}`;
-        if (!groups.has(key)) groups.set(key, []);
-        groups.get(key).push(c);
-      }
-      pile = [...groups.values()].sort((a, b) => b.length - a.length)[0] || [];
-    }
-    if (pile.length === 0) throw new Error('No hay ningún mazo tuyo boca abajo del que robar');
-    const count = Math.max(1, Math.min(10, Number(msg.count) || 1));
-    const top = pile.sort((a, b) => b.zIndex - a.zIndex).slice(0, count);
-    let order = this.nextHandOrder(seat);
-    for (const c of top) {
-      c.zone = 'hand';
-      c.owner = seat;
-      c.order = order++;
-      c.isFaceUp = false;
-      c.rotation = 0;
-      this.reId(c);
-    }
-    this.addLog(`${this.nameOf(seat)} ha robado ${top.length === 1 ? 'una carta' : `${top.length} cartas`}.`);
-  }
-
-  // Jugar una carta de la mano a la mesa
-  act_play(seat, msg) {
     const c = this.cards.get(msg.id);
-    if (!c || c.zone !== 'hand' || c.owner !== seat) throw new Error('Esa carta no está en tu mano');
-    if (!isNum(msg.x) || !isNum(msg.y)) throw new Error('Posición no válida');
-    c.zone = 'board';
-    c.x = clampCoord(msg.x);
-    c.y = clampCoord(msg.y);
-    c.isFaceUp = msg.faceUp !== false;
-    c.rotation = 0;
-    c.zIndex = ++this.nextZ;
-    delete c.order;
-    this.reId(c);
-    this.addLog(
-      c.isFaceUp
-        ? `${this.nameOf(seat)} ha jugado una carta boca arriba.`
-        : `${this.nameOf(seat)} ha colocado una carta boca abajo.`,
-    );
-    return { fx: { select: [c.id] } };
+    if (!c || c.zone !== 'play' || c.side !== seat) throw new Error('Solo puedes voltear cartas de tu zona de juego');
+    c.isFaceUp = !c.isFaceUp;
+    this.addLog(`${this.nameOf(seat)} ha volteado una carta ${c.isFaceUp ? 'boca arriba' : 'boca abajo'}.`);
+  }
+
+  act_rotate(seat, msg) {
+    const c = this.cards.get(msg.id);
+    if (!c || c.zone !== 'play' || c.side !== seat) throw new Error('Solo puedes girar cartas de tu zona de juego');
+    c.rotation += msg.deg === -90 ? -90 : 90;
   }
 
   // Reordenar la mano propia
   act_handOrder(seat, msg) {
     const ids = Array.isArray(msg.ids) ? msg.ids : [];
-    ids.forEach((id, i) => {
+    ids.forEach((id) => {
       const c = this.cards.get(id);
-      if (c && c.zone === 'hand' && c.owner === seat) c.order = i + 1;
+      if (c && c.zone === 'hand' && c.side === seat) c.order = this.nextOrder();
     });
   }
 
-  // Mirar en privado cartas propias boca abajo (p. ej. buscar en el mazo)
+  // Mirar en privado tu biblioteca o tu cementerio
   act_peek(seat, msg, library) {
-    const list = this.boardCards(msg.ids).filter((c) => !c.isFaceUp && c.owner === seat);
-    if (list.length === 0) throw new Error('Selecciona cartas tuyas boca abajo para mirarlas');
-    list.sort((a, b) => b.zIndex - a.zIndex);
-    this.addLog(`${this.nameOf(seat)} está mirando ${list.length === 1 ? 'una carta suya boca abajo' : `${list.length} cartas suyas boca abajo`}.`);
+    const zone = msg.zone === 'graveyard' ? 'graveyard' : 'library';
+    const list = this.zoneCards(seat, zone).reverse(); // de arriba a abajo
+    if (list.length === 0) throw new Error(zone === 'library' ? 'Tu biblioteca está vacía' : 'Tu cementerio está vacío');
+    // La biblioteca vista por id permitiría seguir cartas: se renuevan al cerrar con "barajar"
+    this.addLog(`${this.nameOf(seat)} está mirando ${zone === 'library' ? 'su biblioteca' : 'su cementerio'} (${list.length} cartas).`);
     const names = new Map(library.templates.map((t) => [t.id, t.name]));
     return {
       private: {
         t: 'peek',
+        zone,
         cards: list.map((c) => ({ id: c.id, templateId: c.templateId, name: names.get(c.templateId) || '' })),
       },
     };
   }
 
+  // Coger a la mano una carta concreta vista con "mirar"
+  act_takeFromPeek(seat, msg) {
+    const c = this.cards.get(msg.id);
+    if (!c || c.side !== seat || (c.zone !== 'library' && c.zone !== 'graveyard')) throw new Error('Esa carta ya no está ahí');
+    const from = c.zone === 'library' ? 'su biblioteca' : 'su cementerio';
+    this.place(c, seat, 'hand');
+    this.addLog(`${this.nameOf(seat)} ha cogido una carta de ${from} a su mano.`);
+  }
+
   // Enseñar al rival una carta de la mano sin jugarla
   act_reveal(seat, msg, library) {
     const c = this.cards.get(msg.id);
-    if (!c || c.zone !== 'hand' || c.owner !== seat) throw new Error('Esa carta no está en tu mano');
+    if (!c || c.zone !== 'hand' || c.side !== seat) throw new Error('Esa carta no está en tu mano');
     const t = library.templates.find((tp) => tp.id === c.templateId);
     this.addLog(`${this.nameOf(seat)} enseña una carta de su mano: ${t ? t.name : 'carta'}.`, 'reveal');
     return { fx: { reveal: { by: seat, templateId: c.templateId } } };
   }
 
-  act_counterAdd(seat) {
-    this.nextZ++;
-    this.counters.push({
-      id: randomId('counter'),
-      x: 600 + crypto.randomInt(100),
-      y: 330 + crypto.randomInt(100),
-      value: 10,
-      label: 'VIDA',
-      zIndex: this.nextZ,
-    });
-    this.addLog(`${this.nameOf(seat)} ha añadido un contador.`);
+  // Cada jugador solo puede cambiar su propio contador de vida
+  act_life(seat, msg) {
+    if (!isNum(msg.value)) return;
+    const value = clamp(Math.round(msg.value), LIFE_MIN, LIFE_MAX);
+    const prev = this.life[seat];
+    if (value === prev) return;
+    this.life[seat] = value;
+    this.addLog(`${this.nameOf(seat)}: vida ${prev} → ${value}.`);
   }
 
-  act_counterMove(_seat, msg) {
-    const updates = Array.isArray(msg.updates) ? msg.updates.slice(0, 50) : [];
-    for (const u of updates) {
-      const c = this.counters.find((k) => k.id === u?.id);
-      if (!c || !isNum(u.x) || !isNum(u.y)) continue;
-      c.x = clampCoord(u.x);
-      c.y = clampCoord(u.y);
-    }
+  // Tokens: fichas que se ponen encima de las cartas. Las coordenadas llegan
+  // desde el punto de vista de quien las mueve.
+  toP1(seat, x, y) {
+    const cx = clamp(x, 0, BOARD_W - TOKEN_SIZE);
+    const cy = clamp(y, 0, BOARD_H - TOKEN_SIZE);
+    return seat === 'p1' ? { x: cx, y: cy } : { x: BOARD_W - TOKEN_SIZE - cx, y: BOARD_H - TOKEN_SIZE - cy };
   }
 
-  act_counterFront(_seat, msg) {
-    const ids = new Set(Array.isArray(msg.ids) ? msg.ids : []);
-    const list = this.counters.filter((c) => ids.has(c.id)).sort((a, b) => a.zIndex - b.zIndex);
-    for (const c of list) c.zIndex = ++this.nextZ;
+  act_tokenAdd(seat, msg) {
+    if (this.tokens.length >= 60) throw new Error('Hay demasiados tokens en la mesa');
+    const x = isNum(msg.x) ? msg.x : BOARD_W / 2 - TOKEN_SIZE / 2;
+    const y = isNum(msg.y) ? msg.y : 560;
+    const token = { id: randomId('token'), ...this.toP1(seat, x, y) };
+    this.tokens.push(token);
+    this.addLog(`${this.nameOf(seat)} ha añadido un token.`);
   }
 
-  act_counterValue(seat, msg) {
-    const c = this.counters.find((k) => k.id === msg.id);
-    if (!c || !isNum(msg.value)) return;
-    const value = Math.max(0, Math.min(10, Math.round(msg.value)));
-    if (value === c.value) return;
-    const prev = c.value;
-    c.value = value;
-    this.addLog(`${this.nameOf(seat)}: ${c.label || 'VIDA'} ${prev} → ${value}.`);
+  act_tokenMove(seat, msg) {
+    const t = this.tokens.find((k) => k.id === msg.id);
+    if (!t || !isNum(msg.x) || !isNum(msg.y)) return;
+    Object.assign(t, this.toP1(seat, msg.x, msg.y));
   }
 
-  act_counterLabel(_seat, msg) {
-    const c = this.counters.find((k) => k.id === msg.id);
-    if (!c) return;
-    c.label = String(msg.label || '').slice(0, 12);
+  act_tokenDelete(seat, msg) {
+    const before = this.tokens.length;
+    this.tokens = this.tokens.filter((k) => k.id !== msg.id);
+    if (this.tokens.length !== before) this.addLog(`${this.nameOf(seat)} ha quitado un token.`);
   }
 
   act_reset(seat) {
     this.cards.clear();
-    for (const c of this.counters) c.value = 10;
-    this.addLog(`${this.nameOf(seat)} ha reiniciado la mesa (se han retirado todas las cartas y las manos).`);
+    this.tokens = [];
+    this.life = { p1: LIFE_START, p2: LIFE_START };
+    this.addLog(`${this.nameOf(seat)} ha reiniciado la mesa (sin cartas ni tokens, vidas a ${LIFE_START}).`);
   }
 
   act_chat(seat, msg) {
@@ -441,4 +419,3 @@ export class Game {
     this.addLog(`${this.nameOf(seat)}: ${text}`, 'chat');
   }
 }
-
