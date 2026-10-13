@@ -4,6 +4,7 @@ import {
   Copy,
   Eye,
   EyeOff,
+  History,
   Hand,
   Layers,
   LogOut,
@@ -13,6 +14,7 @@ import {
   RotateCw,
   Search,
   Shuffle,
+  Trophy,
   X,
 } from 'lucide-react';
 import type { CardTemplate } from '../types';
@@ -39,6 +41,7 @@ import {
   type ZoneKey,
 } from './layout';
 import { inviteLink } from './server';
+import { MatchHistory } from './MatchHistory';
 import type { ConnectionStatus } from './useOnlineGame';
 
 interface OnlineTableProps {
@@ -107,7 +110,9 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
   const oppInfo = state.players[opp];
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [playFaceUp, setPlayFaceUp] = useState(true);
+  const [showEnd, setShowEnd] = useState(false);
+  const [endReset, setEndReset] = useState(true);
+  const [showHistory, setShowHistory] = useState(false);
   const [showLog, setShowLog] = useState(false);
   const [chatText, setChatText] = useState('');
   const [seenLog, setSeenLog] = useState(state.log.length);
@@ -265,7 +270,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
         return;
       }
       let faceUp: boolean | undefined;
-      if (src.kind === 'hand') faceUp = d.shift ? !playFaceUp : playFaceUp;
+      if (src.kind === 'hand') faceUp = !d.shift; // Mayús al soltar: boca abajo
       if (src.kind === 'library') faceUp = d.shift;
       send({ t: 'move', ...ref, to: 'play', x, y, faceUp });
       return;
@@ -530,15 +535,17 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 14px', fontSize: 15 }}>
             <Hand size={16} />
             <strong>Tu mano ({state.hand.length})</strong>
-            <span style={{ color: 'var(--text-muted)', fontSize: 13, flex: 1 }}>Solo tú ves estas cartas</span>
+            <span style={{ color: handRevealed ? 'var(--color-accent)' : 'var(--text-muted)', fontSize: 13, flex: 1 }}>
+              {handRevealed ? 'Tu rival está viendo tu mano' : 'Solo tú ves estas cartas'}
+            </span>
             <button
-              className="btn-secondary"
+              className={handRevealed ? 'btn-primary' : 'btn-secondary'}
               onPointerDown={(e) => e.stopPropagation()}
-              onClick={() => setPlayFaceUp((v) => !v)}
-              title="Cómo se juegan las cartas (Mayús al soltar lo invierte)"
+              onClick={() => send({ t: 'showHand', value: !handRevealed })}
+              title={handRevealed ? 'Volver a ocultar tu mano' : 'Enseñar todas las cartas de tu mano al rival hasta que la vuelvas a ocultar'}
               style={{ padding: '3px 10px', fontSize: 13 }}
             >
-              {playFaceUp ? <Eye size={13} /> : <EyeOff size={13} />} {playFaceUp ? 'Jugar boca arriba' : 'Jugar boca abajo'}
+              {handRevealed ? <EyeOff size={13} /> : <Eye size={13} />} {handRevealed ? 'Ocultar mi mano' : 'Enseñar mi mano'}
             </button>
           </div>
         </div>
@@ -596,11 +603,17 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
         <div className="glass-panel" style={{ position: 'absolute', left: r.x, top: r.y, width: r.w, height: r.h, borderRadius: 18 }}>
           <div style={{ position: 'absolute', bottom: 6, left: 0, right: 0, textAlign: 'center', fontSize: 14, color: 'var(--text-muted)' }}>
             Mano de <strong style={{ color: '#fff' }}>{oppInfo?.name || 'tu rival'}</strong>: {state.oppHand.length} {state.oppHand.length === 1 ? 'carta' : 'cartas'}
+            {oppInfo?.handRevealed && <span style={{ color: 'var(--color-accent)' }}> · te la está enseñando</span>}
           </div>
         </div>
         {state.oppHand.map((c, i) => (
-          <div key={i} style={{ ...cardFrame, left: slots[i], top: y, width: SMALL_W, height: SMALL_H, zIndex: 300 + i }}>
-            {cardImage(undefined, c, false)}
+          <div
+            key={i}
+            onPointerEnter={() => c.templateId && showPreview(`opp-hand-${i}`, c.templateId, slots[i])}
+            onPointerLeave={hidePreview}
+            style={{ ...cardFrame, left: slots[i], top: y, width: SMALL_W, height: SMALL_H, zIndex: 300 + i }}
+          >
+            {cardImage(c.templateId, c, !!c.templateId)}
           </div>
         ))}
       </React.Fragment>
@@ -656,7 +669,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
     const top = drag.y - drag.grabY;
     let content: React.ReactNode;
     let rotation = 0;
-    if (src.kind === 'hand') content = cardImage(src.templateId, src.back, drag.shift ? !playFaceUp : playFaceUp);
+    if (src.kind === 'hand') content = cardImage(src.templateId, src.back, !drag.shift);
     else if (src.kind === 'library' || src.kind === 'graveyard') content = cardImage(undefined, src.back, false);
     else {
       content = cardImage(src.card.templateId, src.card, src.card.isFaceUp);
@@ -732,6 +745,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
     setChatText('');
   };
 
+  const handRevealed = !!myInfo?.handRevealed;
   const myCardsInGame = state.me.library.count + state.hand.length + state.me.graveyard.length + state.me.play.length > 0;
   const unread = showLog ? 0 : Math.max(0, state.log.length - seenLog);
   const btn: React.CSSProperties = { padding: '7px 10px', fontSize: 14 };
@@ -740,6 +754,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
     !!hoverTemplate &&
     !drag &&
     (state.hand.some((c) => c.id === hoverTemplate.cardId) ||
+      state.oppHand.some((c, i) => `opp-hand-${i}` === hoverTemplate.cardId && c.templateId === hoverTemplate.templateId) ||
       [...state.me.play, ...state.opp.play].some((c) => c.id === hoverTemplate.cardId && c.isFaceUp));
   const previewTemplate = hoverStillThere ? templateMap.get(hoverTemplate!.templateId) : undefined;
 
@@ -829,6 +844,14 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
         <button className="btn-secondary" onClick={() => setShowLog((v) => !v)} style={{ ...btn, flex: 1 }}>
           <MessageSquare size={14} /> Chat
           {unread > 0 && <span style={{ marginLeft: 2, background: 'var(--color-accent)', borderRadius: 10, padding: '0 6px', fontSize: 12 }}>{unread}</span>}
+        </button>
+      </div>
+      <div style={{ display: 'flex', gap: 6 }}>
+        <button className="btn-primary" onClick={() => setShowEnd(true)} disabled={!oppInfo} style={{ ...btn, flex: 1, opacity: oppInfo ? 1 : 0.5 }} title="Registrar quién ha ganado">
+          <Trophy size={14} /> Terminar partida
+        </button>
+        <button className="btn-secondary" onClick={() => setShowHistory(true)} style={{ ...btn, flex: 1 }} title="Ver quién ha ganado y con qué mazos">
+          <History size={14} /> Historial
         </button>
       </div>
       <div style={{ display: 'flex', gap: 6 }}>
@@ -1069,6 +1092,51 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
           )}
         </Overlay>
       )}
+
+      {/* Fin de partida: quién ha ganado */}
+      {showEnd && (
+        <Overlay onClose={() => setShowEnd(false)}>
+          <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: 6 }}>¿Quién ha ganado?</h3>
+          <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 16 }}>Se guardará en el historial con los mazos de cada uno.</p>
+          <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap', marginBottom: 14 }}>
+            {(['p1', 'p2'] as Seat[]).map((seat) => {
+              const p = state.players[seat];
+              if (!p) return null;
+              return (
+                <button
+                  key={seat}
+                  className="btn-primary"
+                  style={{ padding: '10px 18px', fontSize: '0.95rem' }}
+                  onClick={() => {
+                    send({ t: 'endMatch', winner: seat, reset: endReset });
+                    setShowEnd(false);
+                  }}
+                >
+                  <Trophy size={15} /> {p.name}
+                  {seat === me ? ' (tú)' : ''}
+                  {p.deckId && library.deckNames[p.deckId] ? <span style={{ opacity: 0.75, fontWeight: 400 }}> · {library.deckNames[p.deckId]}</span> : null}
+                </button>
+              );
+            })}
+            <button
+              className="btn-secondary"
+              style={{ padding: '10px 18px', fontSize: '0.95rem' }}
+              onClick={() => {
+                send({ t: 'endMatch', winner: 'draw', reset: endReset });
+                setShowEnd(false);
+              }}
+            >
+              Empate
+            </button>
+          </div>
+          <label style={{ fontSize: '0.82rem', color: 'var(--text-muted)', display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+            <input type="checkbox" checked={endReset} onChange={(e) => setEndReset(e.target.checked)} />
+            Limpiar la mesa para jugar otra (vidas a 10)
+          </label>
+        </Overlay>
+      )}
+
+      {showHistory && <MatchHistory serverUrl={serverUrl} roomCode={state.code} onClose={() => setShowHistory(false)} />}
 
       {/* Carta enseñada por el rival */}
       {reveal && reveal.by !== me && (

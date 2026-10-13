@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowLeft, Globe, LogIn, Plus, Upload } from 'lucide-react';
+import { ArrowLeft, Globe, History, LogIn, Plus, Upload } from 'lucide-react';
 import type { CardTemplate } from '../types';
 import type { PeekResult, Seat, ServerLibrary, StateEffects } from './types';
 import { OnlineTable } from './OnlineTable';
+import { MatchHistory } from './MatchHistory';
 import { loadStoredSession, useOnlineGame } from './useOnlineGame';
 import {
   fetchLibrary,
@@ -32,6 +33,7 @@ export const OnlineMode: React.FC<OnlineModeProps> = ({ initialCode, localLibrar
   const [adminKey, setAdminKey] = useState(() => localStorage.getItem('online_admin_key') || '');
   const [publishing, setPublishing] = useState<{ done: number; total: number } | null>(null);
   const [showPublish, setShowPublish] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
   // Biblioteca leída de la carpeta data/ del simulador (para publicar desde el navegador)
   const [folderLibrary, setFolderLibrary] = useState<OnlineModeProps['localLibrary'] | null>(null);
 
@@ -48,6 +50,10 @@ export const OnlineMode: React.FC<OnlineModeProps> = ({ initialCode, localLibrar
 
   const handleEffects = useCallback((fx: StateEffects) => {
     if (fx.reveal) setReveal(fx.reveal);
+    if (fx.matchEnded) {
+      const m = fx.matchEnded;
+      toast(m.winner === 'draw' ? 'Partida registrada: empate' : `Partida registrada: gana ${m.players[m.winner].name}`);
+    }
     // Solo se selecciona automáticamente lo que ha hecho este jugador
     if (fx.select && fx.by === youRef.current) setSelectRequest(fx.select);
   }, []);
@@ -337,6 +343,12 @@ export const OnlineMode: React.FC<OnlineModeProps> = ({ initialCode, localLibrar
           </div>
         )}
 
+        {serverUrl && !libraryError && (
+          <button className="btn-secondary" onClick={() => setShowHistory(true)} style={{ padding: 8, fontSize: '0.8rem' }}>
+            <History size={14} /> Historial de partidas
+          </button>
+        )}
+
         <button
           className="btn-secondary"
           onClick={() => {
@@ -349,6 +361,7 @@ export const OnlineMode: React.FC<OnlineModeProps> = ({ initialCode, localLibrar
         </button>
       </div>
       {toastMsg && <Toast message={toastMsg} />}
+      {showHistory && <MatchHistory serverUrl={serverUrl} onClose={() => setShowHistory(false)} />}
     </div>
   );
 };

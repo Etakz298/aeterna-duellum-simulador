@@ -15,6 +15,8 @@ Simulador de mesa para Aeterna Duellum. Funciona como app de escritorio (Electro
   - **Tokens**: fichas amarillas que se ponen encima de las cartas y se mueven libremente. Doble clic o clic derecho para quitarlas.
   - El servidor es el único que sabe qué carta es cada carta boca abajo: los navegadores no reciben esa información hasta que la carta se voltea, así que no se puede hacer trampa mirando el tráfico.
   - Registro de la partida y chat en el botón *Chat*.
+  - **Enseñar mi mano**: botón en tu mano para que el rival vea todas tus cartas hasta que pulses *Ocultar mi mano*.
+  - **Terminar partida**: pregunta quién ha ganado y lo guarda en el **Historial** (por sala, de hoy o todas), con victorias y derrotas por jugador y por mazo. El historial se guarda en el servidor junto a los mazos publicados, así que en Railway necesita el volumen para no perderse.
   - Si se cierra la ventana o se cae la conexión, al volver se recupera el sitio en la sala.
 
 ### Controles online
@@ -22,7 +24,7 @@ Simulador de mesa para Aeterna Duellum. Funciona como app de escritorio (Electro
 | Acción | Cómo |
 | --- | --- |
 | Robar | Clic en tu biblioteca o tecla **R** |
-| Jugar una carta | Arrastrarla de la mano a tu zona de juego (boca arriba; con **Mayús** o el botón de la barra, boca abajo) |
+| Jugar una carta | Arrastrarla de la mano a tu zona de juego (boca arriba; manteniendo **Mayús** al soltar, boca abajo) |
 | Mover cartas | Arrastrar entre tus zonas; dentro de tu zona de juego se colocan donde quieras |
 | Mirar tu biblioteca o cementerio | Botón de la lupa junto al montón. El rival ve en el registro que lo haces |
 | Enseñar una carta de la mano sin jugarla | Pasar el ratón por encima y *Enseñar* |
