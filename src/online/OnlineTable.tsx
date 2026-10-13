@@ -116,7 +116,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
   const [showLog, setShowLog] = useState(false);
   const [chatText, setChatText] = useState('');
   const [seenLog, setSeenLog] = useState(state.log.length);
-  const [hoverTemplate, setHoverTemplate] = useState<{ cardId: string; templateId: string; side: 'left' | 'right' } | null>(null);
+  const [hoverTemplate, setHoverTemplate] = useState<{ cardId: string; templateId: string } | null>(null);
   const [hoverHandId, setHoverHandId] = useState<string | null>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
   const dragRef = useRef<DragState | null>(null);
@@ -331,9 +331,9 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
   const isDragged = (kind: DragSource['kind'], id?: string) =>
     !!drag && drag.moved && drag.src.kind === kind && (id === undefined || ('id' in drag.src && drag.src.id === id));
 
-  const showPreview = (cardId: string, templateId: string | undefined, boardX: number) => {
+  const showPreview = (cardId: string, templateId: string | undefined) => {
     if (!templateId || drag) return;
-    setHoverTemplate({ cardId, templateId, side: boardX > BOARD_W / 2 ? 'left' : 'right' });
+    setHoverTemplate({ cardId, templateId });
   };
   const hidePreview = () => setHoverTemplate(null);
 
@@ -540,7 +540,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
           key={c.id}
           className={`ol-card ol-play ol-enter${instant ? ' ol-instant' : ''}`}
           onPointerDown={(e) => startDrag(e, { kind: 'play', id: c.id, side, card: c }, pos.x, pos.y)}
-          onPointerEnter={() => c.isFaceUp && showPreview(c.id, c.templateId, pos.x)}
+          onPointerEnter={() => c.isFaceUp && showPreview(c.id, c.templateId)}
           onPointerLeave={hidePreview}
           onDoubleClick={() => side === 'me' && send({ t: 'flip', id: c.id })}
           style={{
@@ -603,7 +603,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
               onPointerDown={(e) => startDrag(e, { kind: 'hand', id: c.id, templateId: c.templateId, back: c }, slots[i], y)}
               onPointerEnter={() => {
                 setHoverHandId(c.id);
-                showPreview(c.id, c.templateId, slots[i]);
+                showPreview(c.id, c.templateId);
               }}
               onPointerLeave={() => {
                 setHoverHandId((h) => (h === c.id ? null : h));
@@ -656,7 +656,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
           <div
             key={i}
             className="ol-opp-hand-enter"
-            onPointerEnter={() => c.templateId && showPreview(`opp-hand-${i}`, c.templateId, slots[i])}
+            onPointerEnter={() => c.templateId && showPreview(`opp-hand-${i}`, c.templateId)}
             onPointerLeave={hidePreview}
             style={{ position: 'absolute', left: slots[i], top: y, width: SMALL_W, height: SMALL_H, zIndex: 300 + i, transition: 'left 0.3s ease' }}
           >
@@ -1016,7 +1016,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
             style={{
               position: 'absolute',
               top: 12,
-              [hoverTemplate!.side]: 12,
+              right: 12, // siempre en la misma esquina
               height: 'min(480px, 62%)',
               aspectRatio: `${CARD_W} / ${CARD_H}`,
               objectFit: 'cover',
