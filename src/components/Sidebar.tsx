@@ -59,6 +59,7 @@ interface SidebarProps {
   onUpdateTemplateDeck: (id: string, deckId: string) => void;
   onUpdateTemplateBackType: (id: string, backType: 'backA' | 'backB') => void;
   onUpdateTemplateQuantity: (id: string, quantity: number) => void;
+  onUpdateTemplateSpecial: (id: string, isSpecial: boolean) => void;
   onAddCardsToBoard: (templateId: string, count: number) => void;
   onAddDeckToBoard: (deckId: string) => void; // Add full deck at once!
   onAddCounter: () => void;
@@ -83,6 +84,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onUpdateTemplateDeck,
   onUpdateTemplateBackType,
   onUpdateTemplateQuantity,
+  onUpdateTemplateSpecial,
   onAddCardsToBoard,
   onAddDeckToBoard,
   onAddCounter,
@@ -975,6 +977,22 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                   B
                                 </button>
                               </div>
+
+                              {/* Carta especial: siempre en la parte superior del mazo */}
+                              <button
+                                onClick={() => onUpdateTemplateSpecial(template.id, !template.isSpecial)}
+                                title="Especial: al poner el mazo en la mesa o barajarlo, esta carta queda siempre arriba"
+                                style={{
+                                  padding: '2px 6px',
+                                  fontSize: '0.65rem',
+                                  borderRadius: '4px',
+                                  border: `1px solid ${template.isSpecial ? '#facc15' : 'var(--glass-border)'}`,
+                                  background: template.isSpecial ? 'rgba(250, 204, 21, 0.2)' : 'transparent',
+                                  color: template.isSpecial ? '#facc15' : 'var(--text-muted)',
+                                }}
+                              >
+                                ★ Especial
+                              </button>
                             </div>
 
                             {/* Copies in Deck */}

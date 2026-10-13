@@ -191,6 +191,8 @@ export class Game {
       for (let i = 0; i < qty; i++) pile.push(t);
     }
     shuffleInPlace(pile);
+    // Las cartas especiales van siempre arriba del mazo (las últimas en apilarse)
+    pile.sort((a, b) => Number(!!a.isSpecial) - Number(!!b.isSpecial));
 
     const { x, y } = SPAWN[seat];
     const ids = [];
