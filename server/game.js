@@ -13,13 +13,13 @@ export const SEATS = ['p1', 'p2'];
 const LOG_LIMIT = 80;
 
 // Medidas lógicas (deben coincidir con src/online/layout.ts)
-export const BOARD_W = 1600;
-export const BOARD_H = 900;
+export const BOARD_W = 1920;
+export const BOARD_H = 1080;
 export const PLAY_W = 1320;
-export const PLAY_H = 260;
-export const CARD_W = 100;
-export const CARD_H = 158;
-export const TOKEN_SIZE = 36;
+export const PLAY_H = 320;
+export const CARD_W = 130;
+export const CARD_H = 206;
+export const TOKEN_SIZE = 40;
 const LIFE_MIN = 0;
 const LIFE_MAX = 10;
 const LIFE_START = 10;
@@ -388,7 +388,7 @@ export class Game {
   act_tokenAdd(seat, msg) {
     if (this.tokens.length >= 60) throw new Error('Hay demasiados tokens en la mesa');
     const x = isNum(msg.x) ? msg.x : BOARD_W / 2 - TOKEN_SIZE / 2;
-    const y = isNum(msg.y) ? msg.y : 560;
+    const y = isNum(msg.y) ? msg.y : 600;
     const token = { id: randomId('token'), ...this.toP1(seat, x, y) };
     this.tokens.push(token);
     this.addLog(`${this.nameOf(seat)} ha añadido un token.`);

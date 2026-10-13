@@ -8,8 +8,6 @@ import {
   Layers,
   LogOut,
   MessageSquare,
-  Minus,
-  Plus,
   RefreshCw,
   RotateCcw,
   RotateCw,
@@ -29,6 +27,8 @@ import {
   PLAY_H,
   PLAY_W,
   SIDE_W,
+  SMALL_H,
+  SMALL_W,
   TOKEN_SIZE,
   clamp,
   inRect,
@@ -80,8 +80,6 @@ interface DragState {
   shift: boolean;
 }
 
-const TOP_BAR_H = 52;
-const ZONE_LABEL: Record<ZoneKey, string> = { library: 'Biblioteca', hand: 'Mano', play: 'Zona de juego', graveyard: 'Cementerio' };
 
 const backKey = (b: CardBackInfo) => `${b.backType}-${b.deckId}`;
 
@@ -123,7 +121,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
   const logEndRef = useRef<HTMLDivElement>(null);
   const [fit, setFit] = useState({ scale: 1, left: 0, top: 0 });
 
-  // ---------- Escalado: la mesa lógica 1600x900 ocupa todo lo posible ----------
+  // ---------- Escalado: la mesa lógica 1920x1080 ocupa todo lo posible ----------
 
   useLayoutEffect(() => {
     const el = areaRef.current;
@@ -253,8 +251,9 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
 
     if (to === 'play') {
       const r = zoneRect('me', 'play');
-      const x = clamp(left - r.x, 0, PLAY_W - CARD_W);
-      const y = clamp(top - r.y, 0, PLAY_H - CARD_H);
+      const fromPlay = src.kind === 'play';
+      const x = clamp((fromPlay ? left : d.x - CARD_W / 2) - r.x, 0, PLAY_W - CARD_W);
+      const y = clamp((fromPlay ? top : d.y - CARD_H / 2) - r.y, 0, PLAY_H - CARD_H);
       if (src.kind === 'play' && src.side === 'me') {
         // Reordenar dentro de tu zona: se ve al instante
         patchState((s) => ({
@@ -276,7 +275,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
       // Reordenar la mano según dónde se suelte
       const ids = state.hand.map((c) => c.id).filter((id) => id !== src.id);
       const slots = handSlots(state.hand.length, zoneRect('me', 'hand'));
-      let index = slots.filter((sx) => sx + CARD_W / 2 < d.x).length;
+      let index = slots.filter((sx) => sx + SMALL_W / 2 < d.x).length;
       index = clamp(index, 0, ids.length);
       ids.splice(index, 0, src.id);
       patchState((s) => ({ ...s, hand: ids.map((id) => s.hand.find((c) => c.id === id)!).filter(Boolean) }));
@@ -333,7 +332,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
       return t.imageUrl ? (
         <img src={t.imageUrl} alt={t.name} draggable={false} style={imgStyle} />
       ) : (
-        <div style={{ ...imgStyle, background: '#0f172a', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, padding: 6, textAlign: 'center' }}>
+        <div style={{ ...imgStyle, background: '#1e293b', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, padding: 6, textAlign: 'center' }}>
           {t.name}
         </div>
       );
@@ -350,7 +349,8 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
     );
   };
 
-  const zoneBox = (side: SideKey, zone: ZoneKey, label: string) => {
+  // Franjas marcadas sobre la mesa
+  const band = (side: SideKey, zone: ZoneKey, label: string) => {
     const r = zoneRect(side, zone);
     const target = !!drag && drag.moved && drag.src.kind !== 'token' && side === 'me';
     return (
@@ -358,26 +358,27 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
         key={`${side}-${zone}`}
         style={{
           position: 'absolute',
-          left: r.x + 4,
-          top: r.y + 4,
-          width: r.w - 8,
-          height: r.h - 8,
-          borderRadius: 14,
-          border: `2px ${target ? 'dashed' : 'solid'} ${target ? 'rgba(250, 204, 21, 0.7)' : side === 'me' ? 'rgba(129, 140, 248, 0.35)' : 'rgba(248, 113, 113, 0.3)'}`,
-          background: zone === 'play' ? (side === 'me' ? 'rgba(79, 70, 229, 0.07)' : 'rgba(220, 38, 38, 0.06)') : 'rgba(0, 0, 0, 0.22)',
+          left: r.x,
+          top: r.y,
+          width: r.w,
+          height: r.h,
+          borderRadius: 18,
+          border: `2px dashed ${target ? 'rgba(168, 85, 247, 0.65)' : 'rgba(255, 255, 255, 0.11)'}`,
+          background: target ? 'rgba(168, 85, 247, 0.06)' : 'rgba(255, 255, 255, 0.015)',
+          transition: 'border-color 0.15s, background 0.15s',
           pointerEvents: 'none',
         }}
       >
         <span
           style={{
             position: 'absolute',
-            left: 10,
-            [side === 'me' ? 'top' : 'bottom']: 6,
-            fontSize: 13,
+            left: 16,
+            [side === 'me' ? 'top' : 'bottom']: 8,
+            fontSize: 14,
             fontWeight: 600,
-            letterSpacing: 0.5,
+            letterSpacing: 1,
             textTransform: 'uppercase',
-            color: 'rgba(255,255,255,0.35)',
+            color: 'rgba(255,255,255,0.22)',
           }}
         >
           {label}
@@ -390,8 +391,8 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
   const libraryPile = (side: SideKey) => {
     const lib = (side === 'me' ? state.me : state.opp).library;
     const r = zoneRect(side, 'library');
-    const cx = r.x + (r.w - CARD_W) / 2;
-    const cy = r.y + (side === 'me' ? 26 : r.h - 26 - CARD_H);
+    const cx = r.x + 22;
+    const cy = side === 'me' ? r.y + 8 : r.y + r.h - 8 - SMALL_H;
     const top = lib.top;
     return (
       <React.Fragment key={`lib-${side}`}>
@@ -400,28 +401,32 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
             title={side === 'me' ? 'Clic: robar · Arrastrar: coger la carta de arriba' : undefined}
             onPointerDown={side === 'me' ? (e) => startDrag(e, { kind: 'library', back: top }, cx, cy) : undefined}
             style={{
-              position: 'absolute',
+              ...cardFrame,
               left: cx,
               top: cy,
-              width: CARD_W,
-              height: CARD_H,
+              width: SMALL_W,
+              height: SMALL_H,
               cursor: side === 'me' ? 'grab' : 'default',
-              boxShadow: `${Math.min(lib.count, 8)}px ${Math.min(lib.count, 8)}px 0 rgba(0,0,0,0.45)`,
-              borderRadius: 8,
+              boxShadow: `${Math.min(lib.count, 6)}px ${Math.min(lib.count, 6)}px 0 rgba(0,0,0,0.45), 0 4px 10px rgba(0,0,0,0.3)`,
               zIndex: 5,
             }}
           >
             {cardImage(undefined, top, false)}
           </div>
         )}
-        <div style={{ ...pileCount, left: r.x + r.w - 46, top: side === 'me' ? r.y + 30 : r.y + r.h - 54 }}>{lib.count}</div>
+        <div style={{ ...pill, left: r.x + r.w / 2, top: side === 'me' ? r.y + SMALL_H + 14 : r.y + 8 }}>
+          Biblioteca · {lib.count}
+        </div>
         {side === 'me' && (
-          <div style={{ position: 'absolute', left: r.x + r.w - 50, top: r.y + 64, display: 'flex', flexDirection: 'column', gap: 6, zIndex: 6 }}>
+          <div style={{ position: 'absolute', left: r.x + 140, top: r.y + 14, display: 'flex', flexDirection: 'column', gap: 8, zIndex: 6 }}>
+            <button className="btn-secondary" style={pileBtn} title="Robar (R)" onClick={draw} disabled={!lib.count}>
+              <Hand size={18} />
+            </button>
             <button className="btn-secondary" style={pileBtn} title="Barajar tu biblioteca" onClick={() => send({ t: 'shuffleLibrary' })} disabled={!lib.count}>
-              <Shuffle size={16} />
+              <Shuffle size={18} />
             </button>
             <button className="btn-secondary" style={pileBtn} title="Mirar tu biblioteca (el rival verá que lo haces)" onClick={() => send({ t: 'peek', zone: 'library' })} disabled={!lib.count}>
-              <Search size={16} />
+              <Search size={18} />
             </button>
           </div>
         )}
@@ -435,9 +440,9 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
     const r = zoneRect(side, 'graveyard');
     const shown = list.slice(-4);
     // La carta girada ocupa 158x100: centrada en horizontal y pegada al lado del dueño
-    const centerY = side === 'me' ? r.y + 86 : r.y + r.h - 86;
-    const baseX = r.x + (r.w - CARD_W) / 2;
-    const baseY = centerY - CARD_H / 2;
+    const centerY = side === 'me' ? r.y + 80 : r.y + r.h - 80;
+    const baseX = r.x + (r.w - SMALL_W) / 2;
+    const baseY = centerY - SMALL_H / 2;
     return (
       <React.Fragment key={`grave-${side}`}>
         {shown.map((c, i) => {
@@ -450,16 +455,14 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
               onPointerDown={isTop ? (e) => startDrag(e, { kind: 'graveyard', id: c.id, side, back: c }, x, y) : undefined}
               title={isTop ? 'Arrastra la carta de arriba para cogerla' : undefined}
               style={{
-                position: 'absolute',
+                ...cardFrame,
                 left: x,
                 top: y,
-                width: CARD_W,
-                height: CARD_H,
+                width: SMALL_W,
+                height: SMALL_H,
                 transform: 'rotate(-90deg)',
-                borderRadius: 8,
                 cursor: isTop ? 'grab' : 'default',
                 opacity: isTop && isDragged('graveyard', c.id) ? 0.25 : 1,
-                boxShadow: '0 2px 6px rgba(0,0,0,0.5)',
                 zIndex: 5 + i,
               }}
             >
@@ -467,15 +470,17 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
             </div>
           );
         })}
-        <div style={{ ...pileCount, left: r.x + 14, top: side === 'me' ? r.y + 146 : r.y + 18 }}>{list.length}</div>
+        <div style={{ ...pill, left: side === 'me' && list.length > 0 ? r.x + 82 : r.x + r.w / 2, top: side === 'me' ? r.y + 150 : r.y + 18 }}>
+          Cementerio · {list.length}
+        </div>
         {side === 'me' && list.length > 0 && (
           <button
             className="btn-secondary"
-            style={{ ...pileBtn, position: 'absolute', left: r.x + r.w - 50, top: r.y + 142, zIndex: 12 }}
+            style={{ ...pileBtn, position: 'absolute', left: r.x + r.w - 48, top: r.y + 144, zIndex: 12 }}
             title="Ver tu cementerio (el rival verá que lo haces)"
             onClick={() => send({ t: 'peek', zone: 'graveyard' })}
           >
-            <Search size={16} />
+            <Search size={18} />
           </button>
         )}
       </React.Fragment>
@@ -494,18 +499,18 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
           onPointerLeave={hidePreview}
           onDoubleClick={() => side === 'me' && send({ t: 'flip', id: c.id })}
           style={{
-            position: 'absolute',
+            ...cardFrame,
             left: pos.x,
             top: pos.y,
             width: CARD_W,
             height: CARD_H,
             transform: `rotate(${c.rotation}deg)`,
-            transition: 'transform 0.15s ease',
-            borderRadius: 8,
+            transition: 'transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.2), box-shadow 0.15s',
             zIndex: 20 + (c.order % 100000),
             cursor: 'grab',
             opacity: isDragged('play', c.id) ? 0.25 : 1,
-            boxShadow: selected ? '0 0 0 3px #facc15, 0 6px 16px rgba(0,0,0,0.6)' : '0 4px 10px rgba(0,0,0,0.5)',
+            border: selected ? '3px solid var(--color-accent)' : cardFrame.border,
+            boxShadow: selected ? '0 0 22px var(--color-accent-glow), 0 10px 25px rgba(0,0,0,0.6)' : cardFrame.boxShadow,
           }}
         >
           {cardImage(c.templateId, c, c.isFaceUp)}
@@ -513,112 +518,130 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
       );
     });
 
-  const myHand = () => {
+  // Bandeja de la mano propia (como en un jugador, pero dentro de su franja)
+  const myHandTray = () => {
     const r = zoneRect('me', 'hand');
-    const slots = handSlots(state.hand.length, r);
-    const y = r.y + (r.h - CARD_H) / 2 + 6;
-    return state.hand.map((c, i) => {
-      const hovered = hoverHandId === c.id && !drag;
-      return (
-        <div
-          key={c.id}
-          onPointerDown={(e) => startDrag(e, { kind: 'hand', id: c.id, templateId: c.templateId, back: c }, slots[i], y)}
-          onPointerEnter={() => {
-            setHoverHandId(c.id);
-            showPreview(c.id, c.templateId, slots[i]);
-          }}
-          onPointerLeave={() => {
-            setHoverHandId((h) => (h === c.id ? null : h));
-            hidePreview();
-          }}
-          style={{
-            position: 'absolute',
-            left: slots[i],
-            top: y - (hovered ? 14 : 0),
-            width: CARD_W,
-            height: CARD_H,
-            borderRadius: 8,
-            zIndex: hovered ? 900 : 300 + i,
-            cursor: 'grab',
-            transition: 'top 0.12s ease',
-            opacity: isDragged('hand', c.id) ? 0.25 : 1,
-            boxShadow: '0 4px 10px rgba(0,0,0,0.55)',
-          }}
-        >
-          {cardImage(c.templateId, c, true)}
-          {hovered && (
+    const cardsRect = { x: r.x, y: r.y, w: r.w, h: r.h };
+    const slots = handSlots(state.hand.length, cardsRect);
+    const y = r.y + 36;
+    return (
+      <React.Fragment key="my-hand">
+        <div className="glass-panel" style={{ position: 'absolute', left: r.x, top: r.y, width: r.w, height: r.h, borderRadius: 18 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 14px', fontSize: 15 }}>
+            <Hand size={16} />
+            <strong>Tu mano ({state.hand.length})</strong>
+            <span style={{ color: 'var(--text-muted)', fontSize: 13, flex: 1 }}>Solo tú ves estas cartas</span>
             <button
               className="btn-secondary"
               onPointerDown={(e) => e.stopPropagation()}
-              onClick={() => send({ t: 'reveal', id: c.id })}
-              title="Enseñar esta carta al rival sin jugarla"
-              style={{ position: 'absolute', left: '50%', bottom: -2, transform: 'translate(-50%, 50%)', padding: '3px 8px', fontSize: 12 }}
+              onClick={() => setPlayFaceUp((v) => !v)}
+              title="Cómo se juegan las cartas (Mayús al soltar lo invierte)"
+              style={{ padding: '3px 10px', fontSize: 13 }}
             >
-              <Eye size={12} /> Enseñar
+              {playFaceUp ? <Eye size={13} /> : <EyeOff size={13} />} {playFaceUp ? 'Jugar boca arriba' : 'Jugar boca abajo'}
             </button>
-          )}
+          </div>
         </div>
-      );
-    });
+        {state.hand.map((c, i) => {
+          const hovered = hoverHandId === c.id && !drag;
+          return (
+            <div
+              key={c.id}
+              onPointerDown={(e) => startDrag(e, { kind: 'hand', id: c.id, templateId: c.templateId, back: c }, slots[i], y)}
+              onPointerEnter={() => {
+                setHoverHandId(c.id);
+                showPreview(c.id, c.templateId, slots[i]);
+              }}
+              onPointerLeave={() => {
+                setHoverHandId((h) => (h === c.id ? null : h));
+                hidePreview();
+              }}
+              style={{
+                ...cardFrame,
+                left: slots[i],
+                top: y - (hovered ? 16 : 0),
+                width: SMALL_W,
+                height: SMALL_H,
+                zIndex: hovered ? 900 : 300 + i,
+                cursor: 'grab',
+                transition: 'top 0.12s ease',
+                opacity: isDragged('hand', c.id) ? 0.25 : 1,
+              }}
+            >
+              {cardImage(c.templateId, c, true)}
+              {hovered && (
+                <button
+                  className="btn-secondary"
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={() => send({ t: 'reveal', id: c.id })}
+                  title="Enseñar esta carta al rival sin jugarla"
+                  style={{ position: 'absolute', left: '50%', bottom: 6, transform: 'translateX(-50%)', padding: '3px 8px', fontSize: 12, background: 'rgba(18,24,38,0.9)' }}
+                >
+                  <Eye size={12} /> Enseñar
+                </button>
+              )}
+            </div>
+          );
+        })}
+      </React.Fragment>
+    );
   };
 
-  const oppHand = () => {
+  const oppHandTray = () => {
     const r = zoneRect('opp', 'hand');
     const slots = handSlots(state.oppHand.length, r);
-    const y = r.y + (r.h - CARD_H) / 2 - 6;
-    return state.oppHand.map((c, i) => (
-      <div key={i} style={{ position: 'absolute', left: slots[i], top: y, width: CARD_W, height: CARD_H, zIndex: 300 + i, borderRadius: 8, boxShadow: '0 4px 10px rgba(0,0,0,0.5)' }}>
-        {cardImage(undefined, c, false)}
-      </div>
-    ));
+    const y = r.y + 8;
+    return (
+      <React.Fragment key="opp-hand">
+        <div className="glass-panel" style={{ position: 'absolute', left: r.x, top: r.y, width: r.w, height: r.h, borderRadius: 18 }}>
+          <div style={{ position: 'absolute', bottom: 6, left: 0, right: 0, textAlign: 'center', fontSize: 14, color: 'var(--text-muted)' }}>
+            Mano de <strong style={{ color: '#fff' }}>{oppInfo?.name || 'tu rival'}</strong>: {state.oppHand.length} {state.oppHand.length === 1 ? 'carta' : 'cartas'}
+          </div>
+        </div>
+        {state.oppHand.map((c, i) => (
+          <div key={i} style={{ ...cardFrame, left: slots[i], top: y, width: SMALL_W, height: SMALL_H, zIndex: 300 + i }}>
+            {cardImage(undefined, c, false)}
+          </div>
+        ))}
+      </React.Fragment>
+    );
   };
 
-  const lifePanel = (side: SideKey) => {
+  // Contadores de vida redondos, fijos: el tuyo a la izquierda y el del rival a la derecha
+  const lifeCounter = (side: SideKey) => {
     const mine = side === 'me';
     const value = mine ? state.life.me : state.life.opp;
     const info = mine ? myInfo : oppInfo;
-    const x = mine ? 0 : BOARD_W - SIDE_W;
-    const y = mine ? BOARD_H / 2 : 0;
+    const size = 190;
+    const cx = mine ? SIDE_W / 2 : BOARD_W - SIDE_W / 2;
+    const cy = mine ? zoneRect('me', 'play').y + PLAY_H / 2 : zoneRect('opp', 'play').y + PLAY_H / 2;
     return (
       <div
         key={`life-${side}`}
-        style={{
-          position: 'absolute',
-          left: x + 10,
-          top: y + 10,
-          width: SIDE_W - 20,
-          height: BOARD_H / 2 - 20,
-          borderRadius: 16,
-          background: mine ? 'rgba(79, 70, 229, 0.14)' : 'rgba(220, 38, 38, 0.12)',
-          border: `2px solid ${mine ? 'rgba(129, 140, 248, 0.4)' : 'rgba(248, 113, 113, 0.35)'}`,
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: 12,
-          color: '#fff',
-        }}
+        className="life-counter-token"
+        style={{ left: cx - size / 2, top: cy - size / 2, width: size, height: size, cursor: 'default', zIndex: 50 }}
       >
-        <div style={{ fontSize: 15, fontWeight: 600, textAlign: 'center', padding: '0 6px', wordBreak: 'break-word' }}>
-          {info ? info.name : 'Esperando rival…'}
-          {mine ? ' (tú)' : ''}
+        <div className="life-counter-label" style={{ fontSize: 15, maxWidth: 150 }}>
+          {info ? info.name : 'Esperando…'}
         </div>
         {info && !mine && (info.left || !info.connected) && (
           <div style={{ fontSize: 12, color: 'var(--color-danger)' }}>{info.left ? 'ha salido' : 'desconectado'}</div>
         )}
-        <div style={{ fontSize: 13, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 1 }}>Vida</div>
-        {mine && (
-          <button className="btn-secondary" style={lifeBtn} onClick={() => setLife(value + 1)} disabled={value >= LIFE_MAX} title="Sumar vida">
-            <Plus size={20} />
-          </button>
-        )}
-        <div style={{ fontSize: 64, fontWeight: 800, lineHeight: 1 }}>{value}</div>
-        {mine && (
-          <button className="btn-secondary" style={lifeBtn} onClick={() => setLife(value - 1)} disabled={value <= LIFE_MIN} title="Restar vida">
-            <Minus size={20} />
-          </button>
-        )}
-        <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{(mine ? state.hand.length : state.opp.handCount)} en mano</div>
+        <div className="life-counter-display">
+          {mine && (
+            <button className="life-counter-btn" style={{ width: 36, height: 36 }} onClick={() => setLife(value - 1)} disabled={value <= LIFE_MIN} title="Restar vida">
+              −
+            </button>
+          )}
+          <span className="life-counter-val" style={{ fontSize: 54 }}>
+            {value}
+          </span>
+          {mine && (
+            <button className="life-counter-btn" style={{ width: 36, height: 36 }} onClick={() => setLife(value + 1)} disabled={value >= LIFE_MAX} title="Sumar vida">
+              +
+            </button>
+          )}
+        </div>
       </div>
     );
   };
@@ -626,15 +649,15 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
   // Fantasma de lo que se arrastra
   const ghost = () => {
     if (!drag || !drag.moved) return null;
-    const left = drag.x - drag.grabX;
-    const top = drag.y - drag.grabY;
     const { src } = drag;
     if (src.kind === 'token') return null;
+    const small = src.kind !== 'play';
+    const left = drag.x - drag.grabX;
+    const top = drag.y - drag.grabY;
     let content: React.ReactNode;
     let rotation = 0;
     if (src.kind === 'hand') content = cardImage(src.templateId, src.back, drag.shift ? !playFaceUp : playFaceUp);
-    else if (src.kind === 'library') content = cardImage(undefined, src.back, false);
-    else if (src.kind === 'graveyard') content = cardImage(undefined, src.back, false);
+    else if (src.kind === 'library' || src.kind === 'graveyard') content = cardImage(undefined, src.back, false);
     else {
       content = cardImage(src.card.templateId, src.card, src.card.isFaceUp);
       rotation = src.card.rotation;
@@ -642,16 +665,15 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
     return (
       <div
         style={{
-          position: 'absolute',
+          ...cardFrame,
           left,
           top,
-          width: CARD_W,
-          height: CARD_H,
+          width: small ? SMALL_W : CARD_W,
+          height: small ? SMALL_H : CARD_H,
           zIndex: 500000,
           pointerEvents: 'none',
           transform: `rotate(${rotation}deg) scale(1.05)`,
-          borderRadius: 8,
-          boxShadow: '0 14px 30px rgba(0,0,0,0.7)',
+          boxShadow: '0 18px 36px rgba(0,0,0,0.7)',
         }}
       >
         {content}
@@ -682,7 +704,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
           borderRadius: '50%',
           background: '#facc15',
           border: '3px solid #000',
-          boxShadow: '0 3px 8px rgba(0,0,0,0.6)',
+          boxShadow: '0 4px 10px rgba(0,0,0,0.6)',
           cursor: 'grab',
           zIndex: 400000,
         }}
@@ -690,7 +712,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
     );
   });
 
-  // ---------- Barra superior ----------
+  // ---------- Panel de la sala ----------
 
   const copyInvite = async () => {
     const link = inviteLink(serverUrl, state.code);
@@ -712,7 +734,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
 
   const myCardsInGame = state.me.library.count + state.hand.length + state.me.graveyard.length + state.me.play.length > 0;
   const unread = showLog ? 0 : Math.max(0, state.log.length - seenLog);
-  const btn: React.CSSProperties = { padding: '6px 10px', fontSize: '0.78rem' };
+  const btn: React.CSSProperties = { padding: '7px 10px', fontSize: 14 };
   // La vista ampliada solo se muestra si la carta sigue donde estaba (y boca arriba)
   const hoverStillThere =
     !!hoverTemplate &&
@@ -721,43 +743,57 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
       [...state.me.play, ...state.opp.play].some((c) => c.id === hoverTemplate.cardId && c.isFaceUp));
   const previewTemplate = hoverStillThere ? templateMap.get(hoverTemplate!.templateId) : undefined;
 
-  return (
-    <div style={{ width: '100vw', height: '100vh', display: 'flex', flexDirection: 'column', overflow: 'hidden', userSelect: 'none' }}>
-      {/* Barra superior */}
-      <div
-        className="glass-panel"
-        style={{
-          minHeight: TOP_BAR_H,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          padding: '6px 10px',
-          borderRadius: 0,
-          flexWrap: 'wrap',
-          zIndex: 10,
-          flexShrink: 0,
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-          <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Sala</span>
-          <span style={{ fontSize: '1.1rem', fontWeight: 700, letterSpacing: 3 }}>{state.code}</span>
+  const roomPanel = (
+    <div
+      className="glass-panel"
+      onPointerDown={(e) => e.stopPropagation()}
+      style={{ position: 'absolute', left: 14, top: 14, width: SIDE_W - 28, padding: 16, display: 'flex', flexDirection: 'column', gap: 10, zIndex: 60, fontSize: 14 }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Sala online</div>
+          <div style={{ fontSize: 24, fontWeight: 700, letterSpacing: 3, color: '#fff' }}>{state.code}</div>
         </div>
         <button className="btn-secondary" onClick={copyInvite} title="Copiar enlace de invitación" style={btn}>
-          <Copy size={13} /> Invitar
+          <Copy size={14} /> Invitar
         </button>
-        <div style={{ width: 1, height: 24, background: 'var(--glass-border)' }} />
+      </div>
+      {(['p1', 'p2'] as Seat[]).map((seat) => {
+        const p = state.players[seat];
+        return (
+          <div key={seat} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span
+              style={{
+                width: 9,
+                height: 9,
+                borderRadius: '50%',
+                background: p ? (p.connected ? 'var(--color-success)' : 'var(--color-danger)') : 'var(--text-muted)',
+                flexShrink: 0,
+              }}
+            />
+            <span style={{ flex: 1, color: p ? '#fff' : 'var(--text-muted)' }}>
+              {p ? p.name : 'Esperando rival…'}
+              {seat === me ? ' (tú)' : ''}
+              {p && p.left ? ' · ha salido' : p && !p.connected ? ' · desconectado' : ''}
+            </span>
+          </div>
+        );
+      })}
+      <div style={{ height: 1, background: 'var(--glass-border)' }} />
+      <div style={{ display: 'flex', gap: 6 }}>
         <select
           value={myInfo?.deckId || ''}
           onChange={(e) => send({ t: 'chooseDeck', deckId: e.target.value })}
           style={{
+            flex: 1,
+            minWidth: 0,
             background: 'rgba(0,0,0,0.35)',
             color: '#fff',
             border: '1px solid var(--glass-border)',
             borderRadius: 6,
-            padding: '6px',
-            fontSize: '0.78rem',
+            padding: 7,
+            fontSize: 14,
             fontFamily: 'var(--font-family)',
-            maxWidth: 200,
           }}
         >
           <option value="" disabled>
@@ -769,71 +805,98 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
             </option>
           ))}
         </select>
-        <button className="btn-secondary" onClick={onReloadLibrary} title="Recargar mazos del servidor" style={{ padding: '6px 8px' }}>
-          <RefreshCw size={13} />
+        <button className="btn-secondary" onClick={onReloadLibrary} title="Recargar mazos del servidor" style={{ padding: '6px 9px' }}>
+          <RefreshCw size={14} />
         </button>
+      </div>
+      <button
+        className="btn-primary"
+        disabled={!myInfo?.deckId}
+        onClick={() => {
+          const doSpawn = () => send({ t: 'spawnDeck' });
+          if (myCardsInGame)
+            confirm('Volver a poner el mazo', 'Se retirarán todas tus cartas (biblioteca, mano, mesa y cementerio) y tu mazo se barajará de nuevo en la biblioteca. ¿Seguro?', doSpawn);
+          else doSpawn();
+        }}
+        style={{ ...btn, padding: 10, opacity: myInfo?.deckId ? 1 : 0.5 }}
+      >
+        <Layers size={15} /> Poner mi mazo barajado
+      </button>
+      <div style={{ display: 'flex', gap: 6 }}>
+        <button className="btn-secondary" onClick={addToken} title="Añadir un token a la mesa" style={{ ...btn, flex: 1 }}>
+          <span style={{ width: 13, height: 13, borderRadius: '50%', background: '#facc15', border: '2px solid #000', display: 'inline-block' }} /> Token
+        </button>
+        <button className="btn-secondary" onClick={() => setShowLog((v) => !v)} style={{ ...btn, flex: 1 }}>
+          <MessageSquare size={14} /> Chat
+          {unread > 0 && <span style={{ marginLeft: 2, background: 'var(--color-accent)', borderRadius: 10, padding: '0 6px', fontSize: 12 }}>{unread}</span>}
+        </button>
+      </div>
+      <div style={{ display: 'flex', gap: 6 }}>
         <button
-          className="btn-primary"
-          disabled={!myInfo?.deckId}
-          onClick={() => {
-            const doSpawn = () => send({ t: 'spawnDeck' });
-            if (myCardsInGame)
-              confirm('Volver a poner el mazo', 'Se retirarán todas tus cartas (biblioteca, mano, mesa y cementerio) y tu mazo se barajará de nuevo en la biblioteca. ¿Seguro?', doSpawn);
-            else doSpawn();
-          }}
-          style={{ ...btn, opacity: myInfo?.deckId ? 1 : 0.5 }}
-        >
-          <Layers size={13} /> Poner mazo
-        </button>
-        <button className="btn-secondary" onClick={() => setPlayFaceUp((v) => !v)} title="Cómo se juegan las cartas de la mano (Mayús al soltar lo invierte)" style={btn}>
-          {playFaceUp ? <Eye size={13} /> : <EyeOff size={13} />} {playFaceUp ? 'Jugar boca arriba' : 'Jugar boca abajo'}
-        </button>
-        <button className="btn-secondary" onClick={addToken} title="Añadir un token a la mesa" style={btn}>
-          <span style={{ width: 12, height: 12, borderRadius: '50%', background: '#facc15', border: '2px solid #000', display: 'inline-block' }} /> Token
-        </button>
-
-        {selectedCard && (
-          <>
-            <div style={{ width: 1, height: 24, background: 'var(--glass-border)' }} />
-            <button className="btn-secondary" onClick={flip} title="Voltear (F)" style={btn}>
-              <Eye size={13} /> Voltear
-            </button>
-            <button className="btn-secondary" onClick={() => rotate(-90)} title="Girar a la izquierda (Q)" style={btn}>
-              <RotateCcw size={13} />
-            </button>
-            <button className="btn-secondary" onClick={() => rotate(90)} title="Girar a la derecha (E)" style={btn}>
-              <RotateCw size={13} />
-            </button>
-            <button className="btn-secondary" onClick={() => moveSelected('hand')} title="A la mano (H)" style={btn}>
-              <Hand size={13} /> Mano
-            </button>
-            <button className="btn-secondary" onClick={() => moveSelected('graveyard')} title="Al cementerio (G)" style={btn}>
-              <Archive size={13} /> Cementerio
-            </button>
-          </>
-        )}
-
-        <div style={{ flex: 1 }} />
-        <button className="btn-secondary" onClick={() => setShowLog((v) => !v)} style={{ ...btn, position: 'relative' }}>
-          <MessageSquare size={13} /> Chat
-          {unread > 0 && <span style={{ marginLeft: 4, background: 'var(--color-accent)', borderRadius: 10, padding: '0 6px', fontSize: '0.7rem' }}>{unread}</span>}
-        </button>
-        <button
-          className="btn-secondary"
+          className="btn-danger"
           onClick={() =>
             confirm('Reiniciar mesa', 'Se retirarán todas las cartas y tokens de los dos jugadores y las vidas volverán a 10. ¿Seguro?', () => send({ t: 'reset' }))
           }
-          style={btn}
+          style={{ ...btn, flex: 1 }}
         >
           Reiniciar
         </button>
-        <button className="btn-danger" onClick={onLeave} style={btn}>
-          <LogOut size={13} /> Salir
+        <button className="btn-danger" onClick={onLeave} style={{ ...btn, flex: 1 }}>
+          <LogOut size={14} /> Salir
         </button>
       </div>
+      <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.45 }}>
+        Arrastra las cartas entre tus franjas. R: robar · F: voltear · Q/E: girar · H: a la mano · G: al cementerio
+      </div>
+    </div>
+  );
 
-      {/* Mesa escalada */}
-      <div ref={areaRef} style={{ flex: 1, position: 'relative', overflow: 'hidden' }} onPointerDown={() => setSelectedId(null)}>
+  // Acciones de la carta seleccionada (barra flotante como en un jugador)
+  const selectionBar = selectedCard && (
+    <div
+      className="glass-panel"
+      onPointerDown={(e) => e.stopPropagation()}
+      style={{
+        position: 'absolute',
+        left: SIDE_W + PLAY_W / 2,
+        top: BOARD_H / 2,
+        transform: 'translate(-50%, -50%)',
+        padding: '8px 14px',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        zIndex: 450000,
+        fontSize: 14,
+        whiteSpace: 'nowrap',
+        boxShadow: '0 10px 30px rgba(0,0,0,0.6)',
+      }}
+    >
+      <span style={{ fontWeight: 600, color: 'var(--text-muted)' }}>Carta:</span>
+      <button className="btn-secondary" onClick={flip} title="Voltear (F)" style={btn}>
+        <Eye size={14} /> Voltear
+      </button>
+      <button className="btn-secondary" onClick={() => rotate(-90)} title="Girar a la izquierda (Q)" style={btn}>
+        <RotateCcw size={14} />
+      </button>
+      <button className="btn-secondary" onClick={() => rotate(90)} title="Girar a la derecha (E)" style={btn}>
+        <RotateCw size={14} />
+      </button>
+      <button className="btn-secondary" onClick={() => moveSelected('hand')} title="A la mano (H)" style={btn}>
+        <Hand size={14} /> A la mano
+      </button>
+      <button className="btn-secondary" onClick={() => moveSelected('graveyard')} title="Al cementerio (G)" style={btn}>
+        <Archive size={14} /> Cementerio
+      </button>
+    </div>
+  );
+
+  return (
+    <div className="tabletop-container" style={{ width: '100vw', height: '100vh', cursor: 'default', userSelect: 'none' }}>
+      <div className="tabletop-grid" />
+      <div className="tabletop-texture" />
+
+      {/* Mesa escalada: misma disposición para los dos jugadores */}
+      <div ref={areaRef} style={{ position: 'absolute', inset: 0 }} onPointerDown={() => setSelectedId(null)}>
         <div
           ref={boardRef}
           style={{
@@ -844,32 +907,30 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
             height: BOARD_H,
             transform: `scale(${fit.scale})`,
             transformOrigin: '0 0',
-            background: 'radial-gradient(ellipse at center, #1b2440 0%, #0b1020 75%)',
-            borderRadius: 18,
-            boxShadow: '0 0 0 1px rgba(255,255,255,0.06)',
           }}
         >
           {(['opp', 'me'] as SideKey[]).flatMap((side) =>
-            (['library', 'hand', 'graveyard', 'play'] as ZoneKey[]).map((zone) =>
-              zoneBox(side, zone, zone === 'play' ? `${ZONE_LABEL.play}${side === 'opp' && oppInfo ? ` · ${oppInfo.name}` : side === 'me' ? ' · tú' : ''}` : ZONE_LABEL[zone]),
+            (['library', 'graveyard', 'play'] as ZoneKey[]).map((zone) =>
+              band(side, zone, zone === 'play' ? (side === 'me' ? 'Tu zona de juego' : `Zona de juego de ${oppInfo?.name || 'tu rival'}`) : ''),
             ),
           )}
-          <div style={{ position: 'absolute', left: SIDE_W, top: BOARD_H / 2 - 1, width: PLAY_W, height: 2, background: 'rgba(255,255,255,0.12)' }} />
-          {lifePanel('opp')}
-          {lifePanel('me')}
+          {roomPanel}
+          {lifeCounter('opp')}
+          {lifeCounter('me')}
           {libraryPile('opp')}
           {libraryPile('me')}
           {graveyardPile('opp')}
           {graveyardPile('me')}
-          {oppHand()}
-          {myHand()}
+          {oppHandTray()}
+          {myHandTray()}
           {playCards('opp')}
           {playCards('me')}
+          {selectionBar}
           {tokens}
           {ghost()}
           {!myCardsInGame && (
-            <div style={{ position: 'absolute', left: SIDE_W, top: BOARD_H / 2 + 90, width: PLAY_W, textAlign: 'center', color: 'rgba(255,255,255,0.45)', fontSize: 20, pointerEvents: 'none' }}>
-              {myInfo?.deckId ? 'Pulsa "Poner mazo" para barajar tu mazo en la biblioteca' : 'Elige tu mazo arriba y pulsa "Poner mazo"'}
+            <div style={{ position: 'absolute', left: SIDE_W, top: zoneRect('me', 'play').y + 130, width: PLAY_W, textAlign: 'center', color: 'rgba(255,255,255,0.4)', fontSize: 22, pointerEvents: 'none' }}>
+              {myInfo?.deckId ? 'Pulsa "Poner mi mazo barajado" para empezar' : 'Elige tu mazo en el panel de la sala y pulsa "Poner mi mazo barajado"'}
             </div>
           )}
         </div>
@@ -899,7 +960,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
           <div
             className="glass-panel"
             onPointerDown={(e) => e.stopPropagation()}
-            style={{ position: 'absolute', top: 8, right: 8, width: 300, height: 'min(460px, calc(100% - 16px))', display: 'flex', flexDirection: 'column', zIndex: 700000 }}
+            style={{ position: 'absolute', top: 12, right: 12, width: 300, height: 'min(460px, calc(100% - 24px))', display: 'flex', flexDirection: 'column', zIndex: 700000 }}
           >
             <div style={{ display: 'flex', alignItems: 'center', padding: '10px 12px', borderBottom: '1px solid var(--glass-border)', fontSize: '0.8rem', fontWeight: 600 }}>
               <MessageSquare size={14} style={{ marginRight: 6 }} />
@@ -1024,42 +1085,52 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
   );
 };
 
-// Posiciones x de las cartas de una mano dentro de su zona (se solapan si no caben)
+// Posiciones x de las cartas de una mano dentro de su franja (se solapan si no caben)
 function handSlots(n: number, r: Rect): number[] {
   if (n === 0) return [];
   const pad = 16;
   const avail = r.w - pad * 2;
-  const step = n === 1 ? 0 : Math.min(CARD_W + 8, (avail - CARD_W) / (n - 1));
-  const total = CARD_W + step * (n - 1);
+  const step = n === 1 ? 0 : Math.min(SMALL_W + 10, (avail - SMALL_W) / (n - 1));
+  const total = SMALL_W + step * (n - 1);
   const start = r.x + (r.w - total) / 2;
   return Array.from({ length: n }, (_, i) => start + i * step);
 }
+
+// Marco de carta con el mismo aspecto que la mesa de un jugador
+const cardFrame = {
+  position: 'absolute',
+  borderRadius: 'var(--card-radius)',
+  overflow: 'hidden',
+  border: '2px solid rgba(255, 255, 255, 0.05)',
+  boxShadow: '0 4px 10px rgba(0, 0, 0, 0.3)',
+  background: '#1e293b',
+} satisfies React.CSSProperties;
 
 const imgStyle: React.CSSProperties = {
   width: '100%',
   height: '100%',
   objectFit: 'cover',
-  borderRadius: 8,
   display: 'block',
   pointerEvents: 'none',
 };
 
-const pileCount: React.CSSProperties = {
+const pill: React.CSSProperties = {
   position: 'absolute',
-  minWidth: 36,
-  padding: '2px 8px',
-  borderRadius: 12,
-  background: 'rgba(0,0,0,0.6)',
+  transform: 'translateX(-50%)',
+  padding: '3px 12px',
+  borderRadius: 20,
+  border: '1px solid var(--color-accent)',
+  background: 'rgba(18, 24, 38, 0.92)',
   color: '#fff',
-  fontSize: 15,
+  fontSize: 14,
   fontWeight: 700,
-  textAlign: 'center',
+  whiteSpace: 'nowrap',
   zIndex: 15,
   pointerEvents: 'none',
+  boxShadow: '0 4px 10px rgba(0,0,0,0.5)',
 };
 
-const pileBtn: React.CSSProperties = { padding: 6, width: 36, height: 36, justifyContent: 'center' };
-const lifeBtn: React.CSSProperties = { padding: 8, width: 52, height: 40, justifyContent: 'center' };
+const pileBtn: React.CSSProperties = { padding: 6, width: 40, height: 40, justifyContent: 'center' };
 
 const Overlay: React.FC<{ onClose: () => void; children: React.ReactNode }> = ({ onClose, children }) => (
   <div

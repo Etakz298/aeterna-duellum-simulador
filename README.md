@@ -8,7 +8,7 @@ Simulador de mesa para Aeterna Duellum. Funciona como app de escritorio (Electro
 - **Online 1 contra 1**: botón *Jugar Online (1 vs 1)* en el menú lateral.
   - Un jugador crea una sala y comparte el código (o el enlace de invitación `https://<servidor>/?sala=CODIGO`).
   - Cada uno elige su mazo y pulsa *Poner mi mazo barajado en la mesa*.
-  - La mesa tiene zonas fijas y se escala a la ventana, así los dos jugadores la ven igual sea cual sea su resolución. Tu rival aparece enfrente (girado 180º).
+  - La mesa tiene el mismo aspecto que la de un jugador, con franjas marcadas para cada zona. Se escala a la ventana, así los dos jugadores la ven igual sea cual sea su resolución. Tu rival aparece enfrente (girado 180º).
   - Cada jugador tiene: **Biblioteca** (a la izquierda de la mano), **Mano** (privada), **Cementerio** (a la derecha: las cartas quedan boca abajo, giradas 90º a la izquierda y la última arriba) y su **Zona de juego**.
   - Las cartas nunca salen de las zonas. Puedes coger una carta de la zona de juego o del cementerio del rival y llevarla a tu mano, tu zona de juego o tu cementerio.
   - Vida fija a los lados: la tuya a la izquierda (solo tú puedes cambiarla) y la del rival a la derecha.
