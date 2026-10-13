@@ -2,16 +2,19 @@
 // La mesa se dibuja siempre a 1600x900 y se escala a la ventana, así los dos
 // jugadores la ven igual sea cual sea su resolución.
 
-export const BOARD_W = 1600;
-export const BOARD_H = 900;
-export const SIDE_W = 140; // columnas de los contadores de vida
-export const ROW_H = 190; // fila de biblioteca, mano y cementerio
+export const BOARD_W = 1920;
+export const BOARD_H = 1080;
+export const SIDE_W = 300; // columnas laterales (sala y vidas)
+export const ROW_H = 200; // franja de biblioteca, mano y cementerio
 export const PLAY_W = 1320;
-export const PLAY_H = 260;
-export const CARD_W = 100;
-export const CARD_H = 158;
-export const TOKEN_SIZE = 36;
+export const PLAY_H = 320;
+export const CARD_W = 130; // cartas en la zona de juego
+export const CARD_H = 206;
+export const SMALL_W = 100; // cartas en mano y montones
+export const SMALL_H = 158;
+export const TOKEN_SIZE = 40;
 export const PILE_W = 200;
+export const ZONE_GAP = 20;
 export const LIFE_MIN = 0;
 export const LIFE_MAX = 10;
 
@@ -28,9 +31,9 @@ export type SideKey = 'me' | 'opp';
 // La mesa es simétrica respecto al centro: el rival se ve como si estuviera
 // sentado enfrente (todo girado 180º).
 const MY_ZONES: Record<ZoneKey, Rect> = {
-  play: { x: SIDE_W, y: BOARD_H / 2, w: PLAY_W, h: PLAY_H },
+  play: { x: SIDE_W, y: BOARD_H / 2 + ZONE_GAP / 2, w: PLAY_W, h: PLAY_H },
   library: { x: SIDE_W, y: BOARD_H - ROW_H, w: PILE_W, h: ROW_H },
-  hand: { x: SIDE_W + PILE_W, y: BOARD_H - ROW_H, w: PLAY_W - 2 * PILE_W, h: ROW_H },
+  hand: { x: SIDE_W + PILE_W + ZONE_GAP, y: BOARD_H - ROW_H, w: PLAY_W - 2 * (PILE_W + ZONE_GAP), h: ROW_H },
   graveyard: { x: SIDE_W + PLAY_W - PILE_W, y: BOARD_H - ROW_H, w: PILE_W, h: ROW_H },
 };
 
