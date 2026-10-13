@@ -120,6 +120,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
   const [hoverHandId, setHoverHandId] = useState<string | null>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
   const dragRef = useRef<DragState | null>(null);
+  const justDropped = useRef(new Map<string, number>());
 
   const areaRef = useRef<HTMLDivElement>(null);
   const boardRef = useRef<HTMLDivElement>(null);
@@ -155,6 +156,12 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
   // ---------- Datos derivados ----------
 
   const templateMap = useMemo(() => new Map<string, CardTemplate>(library.templates.map((t) => [t.id, t])), [library.templates]);
+  // Precargar las imágenes para que al voltear una carta se vea al instante
+  useEffect(() => {
+    for (const t of library.templates) if (t.imageUrl) new Image().src = t.imageUrl;
+    for (const url of Object.values(library.backs)) new Image().src = url;
+  }, [library]);
+
   const myPlay = state.me.play;
   const selectedCard = myPlay.find((c) => c.id === selectedId) || null;
 
@@ -265,6 +272,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
           ...s,
           me: { ...s.me, play: s.me.play.map((c) => (c.id === src.id ? { ...c, x, y, order: Math.max(0, ...s.me.play.map((k) => k.order)) + 1 } : c)) },
         }));
+        justDropped.current.set(src.id, Date.now());
         setSelectedId(src.id);
         send({ t: 'move', id: src.id, to: 'play', x, y });
         return;
@@ -457,6 +465,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
           return (
             <div
               key={c.id}
+              className={isTop ? 'ol-grave-enter' : undefined}
               onPointerDown={isTop ? (e) => startDrag(e, { kind: 'graveyard', id: c.id, side, back: c }, x, y) : undefined}
               title={isTop ? 'Arrastra la carta de arriba para cogerla' : undefined}
               style={{
@@ -492,33 +501,69 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
     );
   };
 
+  // Carta de dos caras (como en un jugador): al voltear gira en 3D y al girar rota con rebote
+  const flipCard = (templateId: string | undefined, back: CardBackInfo, faceUp: boolean) => {
+    const t = templateId ? templateMap.get(templateId) : undefined;
+    const backUrl = library.backs[backKey(back)];
+    return (
+      <div className={`card-container ${faceUp ? '' : 'flipped-state'}`}>
+        <div className="card-face card-front">
+          {t?.imageUrl ? (
+            <img src={t.imageUrl} alt={t.name} draggable={false} />
+          ) : (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 14, padding: 8, textAlign: 'center', background: '#0f172a' }}>
+              {t?.name || ''}
+            </div>
+          )}
+        </div>
+        <div className="card-face card-back">
+          {backUrl ? (
+            <img src={backUrl} alt="Reverso" draggable={false} style={{ width: '100%', height: '100%', objectFit: 'cover', pointerEvents: 'none' }} />
+          ) : (
+            <div className="card-back-pattern">
+              <span className="card-back-logo">AD</span>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   const playCards = (side: SideKey) =>
     (side === 'me' ? state.me : state.opp).play.map((c) => {
       const pos = playCardPos(side, c.x, c.y);
       const selected = side === 'me' && c.id === selectedId;
+      // La carta que acabas de soltar no se desliza: ya está donde la dejaste
+      const instant = Date.now() - (justDropped.current.get(c.id) || 0) < 500;
       return (
         <div
           key={c.id}
+          className={`ol-card ol-play ol-enter${instant ? ' ol-instant' : ''}`}
           onPointerDown={(e) => startDrag(e, { kind: 'play', id: c.id, side, card: c }, pos.x, pos.y)}
           onPointerEnter={() => c.isFaceUp && showPreview(c.id, c.templateId, pos.x)}
           onPointerLeave={hidePreview}
           onDoubleClick={() => side === 'me' && send({ t: 'flip', id: c.id })}
           style={{
-            ...cardFrame,
+            position: 'absolute',
             left: pos.x,
             top: pos.y,
             width: CARD_W,
             height: CARD_H,
-            transform: `rotate(${c.rotation}deg)`,
-            transition: 'transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.2), box-shadow 0.15s',
             zIndex: 20 + (c.order % 100000),
             cursor: 'grab',
             opacity: isDragged('play', c.id) ? 0.25 : 1,
-            border: selected ? '3px solid var(--color-accent)' : cardFrame.border,
-            boxShadow: selected ? '0 0 22px var(--color-accent-glow), 0 10px 25px rgba(0,0,0,0.6)' : cardFrame.boxShadow,
           }}
         >
-          {cardImage(c.templateId, c, c.isFaceUp)}
+          <div
+            className="card-rotation-wrapper"
+            style={{
+              transform: `rotate(${c.rotation}deg)`,
+              borderRadius: 'var(--card-radius)',
+              boxShadow: selected ? '0 0 0 3px var(--color-accent), 0 0 24px var(--color-accent-glow)' : 'none',
+            }}
+          >
+            {flipCard(c.templateId, c, c.isFaceUp)}
+          </div>
         </div>
       );
     });
@@ -554,6 +599,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
           return (
             <div
               key={c.id}
+              className="ol-hand-enter"
               onPointerDown={(e) => startDrag(e, { kind: 'hand', id: c.id, templateId: c.templateId, back: c }, slots[i], y)}
               onPointerEnter={() => {
                 setHoverHandId(c.id);
@@ -571,7 +617,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
                 height: SMALL_H,
                 zIndex: hovered ? 900 : 300 + i,
                 cursor: 'grab',
-                transition: 'top 0.12s ease',
+                transition: 'top 0.15s ease, left 0.3s ease',
                 opacity: isDragged('hand', c.id) ? 0.25 : 1,
               }}
             >
@@ -609,11 +655,13 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
         {state.oppHand.map((c, i) => (
           <div
             key={i}
+            className="ol-opp-hand-enter"
             onPointerEnter={() => c.templateId && showPreview(`opp-hand-${i}`, c.templateId, slots[i])}
             onPointerLeave={hidePreview}
-            style={{ ...cardFrame, left: slots[i], top: y, width: SMALL_W, height: SMALL_H, zIndex: 300 + i }}
+            style={{ position: 'absolute', left: slots[i], top: y, width: SMALL_W, height: SMALL_H, zIndex: 300 + i, transition: 'left 0.3s ease' }}
           >
-            {cardImage(c.templateId, c, !!c.templateId)}
+            {/* Cuando el rival enseña la mano, sus cartas se dan la vuelta */}
+            {flipCard(c.templateId, c, !!c.templateId)}
           </div>
         ))}
       </React.Fragment>
@@ -646,7 +694,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
               −
             </button>
           )}
-          <span className="life-counter-val" style={{ fontSize: 54 }}>
+          <span key={value} className="life-counter-val ol-pulse" style={{ fontSize: 54 }}>
             {value}
           </span>
           {mine && (
@@ -685,8 +733,8 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
           height: small ? SMALL_H : CARD_H,
           zIndex: 500000,
           pointerEvents: 'none',
-          transform: `rotate(${rotation}deg) scale(1.05)`,
-          boxShadow: '0 18px 36px rgba(0,0,0,0.7)',
+          transform: `rotate(${rotation + 3}deg) scale(1.07)`,
+          boxShadow: '0 26px 45px rgba(0,0,0,0.65)',
         }}
       >
         {content}
@@ -717,7 +765,9 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
           borderRadius: '50%',
           background: '#facc15',
           border: '3px solid #000',
-          boxShadow: '0 4px 10px rgba(0,0,0,0.6)',
+          boxShadow: dragged ? '0 12px 22px rgba(0,0,0,0.6)' : '0 4px 10px rgba(0,0,0,0.6)',
+          transform: dragged ? 'scale(1.15)' : 'none',
+          transition: dragged ? 'transform 0.15s, box-shadow 0.15s' : 'left 0.3s ease, top 0.3s ease, transform 0.15s, box-shadow 0.15s',
           cursor: 'grab',
           zIndex: 400000,
         }}
