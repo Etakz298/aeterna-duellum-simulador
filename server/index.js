@@ -19,11 +19,33 @@ const DATA_DIR = path.resolve(
 const LIB_DIR = path.join(DATA_DIR, 'library');
 const IMG_DIR = path.join(LIB_DIR, 'images');
 const LIB_FILE = path.join(LIB_DIR, 'library.json');
+const RESULTS_FILE = path.join(DATA_DIR, 'results.json');
 const ADMIN_KEY = process.env.ADMIN_KEY || '';
 const MAX_IMAGE_BYTES = 6 * 1024 * 1024;
 const ROOM_IDLE_MS = 6 * 60 * 60 * 1000;
 
 fs.mkdirSync(IMG_DIR, { recursive: true });
+
+// ---------------- Historial de partidas ----------------
+
+let results = loadResults();
+
+function loadResults() {
+  try {
+    const data = JSON.parse(fs.readFileSync(RESULTS_FILE, 'utf8'));
+    return Array.isArray(data) ? data : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveResult(result) {
+  results.push(result);
+  if (results.length > 5000) results = results.slice(-5000);
+  fs.writeFile(RESULTS_FILE, JSON.stringify(results), (err) => {
+    if (err) console.error('No se pudo guardar el historial:', err.message);
+  });
+}
 
 // ---------------- Biblioteca de cartas ----------------
 
@@ -148,6 +170,8 @@ async function handleHttp(req, res) {
   }
 
   if (pathname === '/health') return sendJson(res, 200, { ok: true, rooms: rooms.size });
+
+  if (pathname === '/api/results' && req.method === 'GET') return sendJson(res, 200, { results });
 
   if (pathname === '/api/library' && req.method === 'GET') {
     return sendJson(res, 200, publicLibrary());
@@ -357,6 +381,7 @@ wss.on('connection', (ws) => {
       }
       const result = room.game.apply(ws.seat, msg, library);
       if (result.private) send(ws, result.private);
+      if (result.result) saveResult(result.result);
       broadcastState(room, result.fx ? { ...result.fx, by: ws.seat } : undefined);
     } catch (err) {
       send(ws, { t: 'error', message: err instanceof Error ? err.message : 'Error' });

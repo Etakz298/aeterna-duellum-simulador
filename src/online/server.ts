@@ -1,5 +1,5 @@
 import type { CardTemplate } from '../types';
-import type { ServerLibrary } from './types';
+import type { MatchResult, ServerLibrary } from './types';
 
 const SERVER_KEY = 'online_server_url';
 
@@ -49,6 +49,12 @@ export async function fetchLibrary(serverUrl: string): Promise<ServerLibrary> {
     })),
     backs: Object.fromEntries(Object.entries(lib.backs).map(([k, v]) => [k, `${serverUrl}${v}`])),
   };
+}
+
+export async function fetchResults(serverUrl: string): Promise<MatchResult[]> {
+  const res = await fetch(`${serverUrl}/api/results`);
+  if (!res.ok) throw new Error(`El servidor respondió ${res.status}`);
+  return ((await res.json()) as { results: MatchResult[] }).results;
 }
 
 // ---------- Publicar la biblioteca local en el servidor ----------

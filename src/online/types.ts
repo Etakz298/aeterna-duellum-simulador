@@ -40,6 +40,7 @@ export interface OnlinePlayer {
   connected: boolean;
   deckId: string | null;
   left?: boolean;
+  handRevealed?: boolean;
 }
 
 export interface LogEntry {
@@ -63,7 +64,7 @@ export interface OnlineState {
   me: OnlineSide;
   opp: OnlineSide;
   hand: OnlineHandCard[];
-  oppHand: CardBackInfo[];
+  oppHand: (CardBackInfo & { templateId?: string })[]; // templateId solo si el rival enseña su mano
   life: { me: number; opp: number };
   tokens: OnlineToken[];
   log: LogEntry[];
@@ -73,6 +74,16 @@ export interface StateEffects {
   by?: Seat;
   select?: string[];
   reveal?: { by: Seat; templateId: string };
+  matchEnded?: MatchResult;
+}
+
+export interface MatchResult {
+  id: string;
+  at: number;
+  room: string;
+  players: Record<Seat, { name: string; deck: string | null }>;
+  winner: Seat | 'draw';
+  by: string;
 }
 
 export interface PeekCard {

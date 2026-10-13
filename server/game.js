@@ -61,7 +61,7 @@ export class Game {
     const seat = SEATS.find((s) => !this.players[s]);
     if (!seat) return null;
     const token = crypto.randomBytes(16).toString('hex');
-    this.players[seat] = { name, token, deckId: null, connected: false };
+    this.players[seat] = { name, token, deckId: null, connected: false, handRevealed: false };
     this.addLog(`${name} se ha unido a la sala.`);
     return { seat, token };
   }
@@ -142,7 +142,7 @@ export class Game {
     const players = {};
     for (const s of SEATS) {
       const p = this.players[s];
-      if (p) players[s] = { name: p.name, connected: p.connected, deckId: p.deckId, left: !!p.left };
+      if (p) players[s] = { name: p.name, connected: p.connected, deckId: p.deckId, left: !!p.left, handRevealed: !!p.handRevealed };
     }
 
     return {
@@ -153,7 +153,10 @@ export class Game {
       me: sideView(seat),
       opp: sideView(opp),
       hand: this.zoneCards(seat, 'hand').map((c) => ({ id: c.id, templateId: c.templateId, deckId: c.deckId, backType: c.backType })),
-      oppHand: this.zoneCards(opp, 'hand').map((c) => ({ deckId: c.deckId, backType: c.backType })),
+      // La mano del rival solo se ve si él ha decidido enseñarla
+      oppHand: this.zoneCards(opp, 'hand').map((c) =>
+        this.players[opp]?.handRevealed ? { deckId: c.deckId, backType: c.backType, templateId: c.templateId } : { deckId: c.deckId, backType: c.backType },
+      ),
       life: { me: this.life[seat], opp: this.life[opp] },
       // Los tokens se guardan vistos por p1; a p2 se le dan girados 180º
       tokens: this.tokens.map((t) =>
@@ -406,7 +409,34 @@ export class Game {
     if (this.tokens.length !== before) this.addLog(`${this.nameOf(seat)} ha quitado un token.`);
   }
 
+  // Enseñar (o volver a ocultar) toda la mano al rival
+  act_showHand(seat, msg) {
+    const value = !!msg.value;
+    if (this.players[seat].handRevealed === value) return;
+    this.players[seat].handRevealed = value;
+    this.addLog(`${this.nameOf(seat)} ${value ? 'enseña su mano al rival' : 'vuelve a ocultar su mano'}.`, value ? 'reveal' : 'event');
+  }
+
+  // Fin de partida: devuelve el resultado para guardarlo en el historial
+  act_endMatch(seat, msg, library) {
+    const winner = msg.winner === 'p1' || msg.winner === 'p2' ? msg.winner : 'draw';
+    if (!this.players.p1 || !this.players.p2) throw new Error('Hacen falta dos jugadores para terminar una partida');
+    const players = {};
+    for (const s of SEATS) {
+      const p = this.players[s];
+      players[s] = { name: p.name, deck: p.deckId ? library.deckNames[p.deckId] || p.deckId : null };
+    }
+    const result = { id: randomId('match'), at: Date.now(), room: this.code, players, winner, by: this.nameOf(seat) };
+    this.addLog(
+      winner === 'draw' ? `${this.nameOf(seat)} ha terminado la partida: empate.` : `${this.nameOf(seat)} ha terminado la partida: gana ${this.nameOf(winner)}.`,
+      'reveal',
+    );
+    if (msg.reset) this.act_reset(seat);
+    return { result, fx: { matchEnded: result } };
+  }
+
   act_reset(seat) {
+    for (const s of SEATS) if (this.players[s]) this.players[s].handRevealed = false;
     this.cards.clear();
     this.tokens = [];
     this.life = { p1: LIFE_START, p2: LIFE_START };
