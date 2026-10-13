@@ -69,7 +69,8 @@ type DragSource =
   | { kind: 'library'; back: CardBackInfo }
   | { kind: 'play'; id: string; side: SideKey; card: OnlinePlayCard }
   | { kind: 'graveyard'; id: string; side: SideKey; back: CardBackInfo }
-  | { kind: 'token'; id: string };
+  | { kind: 'token'; id: string }
+  | { kind: 'view' }; // solo para ampliar con el dedo (mano del rival enseñada)
 
 interface DragState {
   src: DragSource;
@@ -81,6 +82,7 @@ interface DragState {
   y: number;
   moved: boolean;
   shift: boolean;
+  longPress?: boolean;
 }
 
 
@@ -121,6 +123,17 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
   const [drag, setDrag] = useState<DragState | null>(null);
   const dragRef = useRef<DragState | null>(null);
   const justDropped = useRef(new Map<string, number>());
+  // En tablet (pantalla táctil) los controles se hacen más grandes y la vista
+  // ampliada se abre manteniendo el dedo sobre la carta
+  const isTouch = useMemo(() => typeof window !== 'undefined' && !!window.matchMedia?.('(pointer: coarse)').matches, []);
+  const [pressPreview, setPressPreview] = useState<string | null>(null);
+  const pressTimer = useRef<number | undefined>(undefined);
+  const [selectedHandId, setSelectedHandId] = useState<string | null>(null);
+  const [selectedTokenId, setSelectedTokenId] = useState<string | null>(null);
+  const [portrait, setPortrait] = useState(false);
+  const ui = isTouch ? { font: 19, pad: '10px 12px', icon: 20, pile: 56, life: 52 } : { font: 14, pad: '7px 10px', icon: 14, pile: 40, life: 36 };
+  const pileBtn: React.CSSProperties = { padding: 6, width: ui.pile, height: ui.pile, justifyContent: 'center' };
+  const smallBtn: React.CSSProperties = isTouch ? { padding: '6px 12px', fontSize: 16 } : { padding: '3px 10px', fontSize: 13 };
 
   const areaRef = useRef<HTMLDivElement>(null);
   const boardRef = useRef<HTMLDivElement>(null);
@@ -137,6 +150,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
       const h = el.clientHeight;
       const scale = Math.min(w / BOARD_W, h / BOARD_H);
       setFit({ scale, left: (w - BOARD_W * scale) / 2, top: (h - BOARD_H * scale) / 2 });
+      setPortrait(h > w * 1.1);
     };
     update();
     const ro = new ResizeObserver(update);
@@ -163,6 +177,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
   }, [library]);
 
   const myPlay = state.me.play;
+  const selectedHand = state.hand.find((c) => c.id === selectedHandId) || null;
   const selectedCard = myPlay.find((c) => c.id === selectedId) || null;
 
   useEffect(() => {
@@ -225,7 +240,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
 
   // ---------- Arrastrar ----------
 
-  const startDrag = (e: React.PointerEvent, src: DragSource, itemX: number, itemY: number) => {
+  const startDrag = (e: React.PointerEvent, src: DragSource, itemX: number, itemY: number, previewTemplateId?: string) => {
     if (e.button !== 0) return;
     e.preventDefault();
     e.stopPropagation();
@@ -233,15 +248,29 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
     const d: DragState = { src, startX: e.clientX, startY: e.clientY, grabX: p.x - itemX, grabY: p.y - itemY, x: p.x, y: p.y, moved: false, shift: e.shiftKey };
     dragRef.current = d;
     setDrag(d);
+    // Mantener pulsado con el dedo: vista ampliada de la carta
+    window.clearTimeout(pressTimer.current);
+    if (e.pointerType === 'touch' && previewTemplateId) {
+      pressTimer.current = window.setTimeout(() => {
+        const cur = dragRef.current;
+        if (cur && !cur.moved) {
+          dragRef.current = { ...cur, longPress: true };
+          setPressPreview(previewTemplateId);
+        }
+      }, 450);
+    }
   };
 
   const dropRef = useRef<(d: DragState) => void>(() => {});
   dropRef.current = (d: DragState) => {
     const { src } = d;
+    if (d.longPress || src.kind === 'view') return;
     if (!d.moved) {
-      // Clic sin arrastrar
+      // Clic (o toque) sin arrastrar
       if (src.kind === 'library') draw();
       else if (src.kind === 'play' && src.side === 'me') setSelectedId(src.id);
+      else if (src.kind === 'hand') setSelectedHandId((h) => (h === src.id ? null : src.id));
+      else if (src.kind === 'token') setSelectedTokenId((t) => (t === src.id ? null : src.id));
       return;
     }
     const left = d.x - d.grabX;
@@ -307,7 +336,9 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
       const d = dragRef.current;
       if (!d) return;
       const p = toBoard(e.clientX, e.clientY);
-      const moved = d.moved || Math.hypot(e.clientX - d.startX, e.clientY - d.startY) > 5;
+      if (d.longPress) return; // mientras se ve la carta ampliada no se arrastra
+      const moved = d.moved || Math.hypot(e.clientX - d.startX, e.clientY - d.startY) > (e.pointerType === 'touch' ? 10 : 5);
+      if (moved) window.clearTimeout(pressTimer.current);
       const next = { ...d, x: p.x, y: p.y, moved, shift: e.shiftKey };
       dragRef.current = next;
       setDrag(next);
@@ -316,6 +347,8 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
       const d = dragRef.current;
       dragRef.current = null;
       setDrag(null);
+      window.clearTimeout(pressTimer.current);
+      setPressPreview(null);
       if (d && e.type === 'pointerup') dropRef.current({ ...d, shift: e.shiftKey });
     };
     window.addEventListener('pointermove', move);
@@ -331,8 +364,8 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
   const isDragged = (kind: DragSource['kind'], id?: string) =>
     !!drag && drag.moved && drag.src.kind === kind && (id === undefined || ('id' in drag.src && drag.src.id === id));
 
-  const showPreview = (cardId: string, templateId: string | undefined) => {
-    if (!templateId || drag) return;
+  const showPreview = (e: React.PointerEvent, cardId: string, templateId: string | undefined) => {
+    if (!templateId || drag || e.pointerType === 'touch') return;
     setHoverTemplate({ cardId, templateId });
   };
   const hidePreview = () => setHoverTemplate(null);
@@ -432,9 +465,11 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
         </div>
         {side === 'me' && (
           <div style={{ position: 'absolute', left: r.x + 140, top: r.y + 14, display: 'flex', flexDirection: 'column', gap: 8, zIndex: 6 }}>
-            <button className="btn-secondary" style={pileBtn} title="Robar (R)" onClick={draw} disabled={!lib.count}>
-              <Hand size={18} />
-            </button>
+            {!isTouch && (
+              <button className="btn-secondary" style={pileBtn} title="Robar (R)" onClick={draw} disabled={!lib.count}>
+                <Hand size={18} />
+              </button>
+            )}
             <button className="btn-secondary" style={pileBtn} title="Barajar tu biblioteca" onClick={() => send({ t: 'shuffleLibrary' })} disabled={!lib.count}>
               <Shuffle size={18} />
             </button>
@@ -484,13 +519,13 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
             </div>
           );
         })}
-        <div style={{ ...pill, left: side === 'me' && list.length > 0 ? r.x + 82 : r.x + r.w / 2, top: side === 'me' ? r.y + 150 : r.y + 18 }}>
+        <div style={{ ...pill, left: side === 'me' && list.length > 0 ? r.x + (isTouch ? 70 : 82) : r.x + r.w / 2, top: side === 'me' ? r.y + 150 : r.y + 18 }}>
           Cementerio · {list.length}
         </div>
         {side === 'me' && list.length > 0 && (
           <button
             className="btn-secondary"
-            style={{ ...pileBtn, position: 'absolute', left: r.x + r.w - 48, top: r.y + 144, zIndex: 12 }}
+            style={{ ...pileBtn, position: 'absolute', left: r.x + r.w - ui.pile - 6, top: r.y + 196 - ui.pile - 6, zIndex: 12 }}
             title="Ver tu cementerio (el rival verá que lo haces)"
             onClick={() => send({ t: 'peek', zone: 'graveyard' })}
           >
@@ -539,8 +574,8 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
         <div
           key={c.id}
           className={`ol-card ol-play ol-enter${instant ? ' ol-instant' : ''}`}
-          onPointerDown={(e) => startDrag(e, { kind: 'play', id: c.id, side, card: c }, pos.x, pos.y)}
-          onPointerEnter={() => c.isFaceUp && showPreview(c.id, c.templateId)}
+          onPointerDown={(e) => startDrag(e, { kind: 'play', id: c.id, side, card: c }, pos.x, pos.y, c.isFaceUp ? c.templateId : undefined)}
+          onPointerEnter={(e) => c.isFaceUp && showPreview(e, c.id, c.templateId)}
           onPointerLeave={hidePreview}
           onDoubleClick={() => side === 'me' && send({ t: 'flip', id: c.id })}
           style={{
@@ -577,33 +612,54 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
     return (
       <React.Fragment key="my-hand">
         <div className="glass-panel" style={{ position: 'absolute', left: r.x, top: r.y, width: r.w, height: r.h, borderRadius: 18 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 14px', fontSize: 15 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: isTouch ? '4px 10px' : '6px 14px', fontSize: isTouch ? 17 : 15 }}>
             <Hand size={16} />
             <strong>Tu mano ({state.hand.length})</strong>
-            <span style={{ color: handRevealed ? 'var(--color-accent)' : 'var(--text-muted)', fontSize: 13, flex: 1 }}>
-              {handRevealed ? 'Tu rival está viendo tu mano' : 'Solo tú ves estas cartas'}
+            <span style={{ color: handRevealed ? 'var(--color-accent)' : 'var(--text-muted)', fontSize: isTouch ? 15 : 13, flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {selectedHand ? '' : handRevealed ? 'Tu rival está viendo tu mano' : 'Solo tú ves estas cartas'}
             </span>
+            {selectedHand && (
+              <>
+                <button className="btn-secondary" onPointerDown={(e) => e.stopPropagation()} onClick={() => send({ t: 'reveal', id: selectedHand.id })} title="Enseñar esta carta al rival sin jugarla" style={smallBtn}>
+                  <Eye size={ui.icon} /> Enseñar
+                </button>
+                <button
+                  className="btn-secondary"
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={() => {
+                    const r2 = zoneRect('me', 'play');
+                    send({ t: 'move', id: selectedHand.id, to: 'play', x: (r2.w - CARD_W) / 2, y: (r2.h - CARD_H) / 2, faceUp: false });
+                    setSelectedHandId(null);
+                  }}
+                  title="Jugar esta carta boca abajo en el centro de tu zona"
+                  style={smallBtn}
+                >
+                  <EyeOff size={ui.icon} /> Jugar boca abajo
+                </button>
+              </>
+            )}
             <button
               className={handRevealed ? 'btn-primary' : 'btn-secondary'}
               onPointerDown={(e) => e.stopPropagation()}
               onClick={() => send({ t: 'showHand', value: !handRevealed })}
               title={handRevealed ? 'Volver a ocultar tu mano' : 'Enseñar todas las cartas de tu mano al rival hasta que la vuelvas a ocultar'}
-              style={{ padding: '3px 10px', fontSize: 13 }}
+              style={smallBtn}
             >
-              {handRevealed ? <EyeOff size={13} /> : <Eye size={13} />} {handRevealed ? 'Ocultar mi mano' : 'Enseñar mi mano'}
+              {handRevealed ? <EyeOff size={ui.icon} /> : <Eye size={ui.icon} />} {handRevealed ? 'Ocultar mi mano' : 'Enseñar mi mano'}
             </button>
           </div>
         </div>
         {state.hand.map((c, i) => {
-          const hovered = hoverHandId === c.id && !drag;
+          const hovered = (hoverHandId === c.id || selectedHandId === c.id) && !drag;
           return (
             <div
               key={c.id}
               className="ol-hand-enter"
-              onPointerDown={(e) => startDrag(e, { kind: 'hand', id: c.id, templateId: c.templateId, back: c }, slots[i], y)}
-              onPointerEnter={() => {
+              onPointerDown={(e) => startDrag(e, { kind: 'hand', id: c.id, templateId: c.templateId, back: c }, slots[i], y, c.templateId)}
+              onPointerEnter={(e) => {
+                if (e.pointerType === 'touch') return;
                 setHoverHandId(c.id);
-                showPreview(c.id, c.templateId);
+                showPreview(e, c.id, c.templateId);
               }}
               onPointerLeave={() => {
                 setHoverHandId((h) => (h === c.id ? null : h));
@@ -622,7 +678,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
               }}
             >
               {cardImage(c.templateId, c, true)}
-              {hovered && (
+              {hovered && !isTouch && (
                 <button
                   className="btn-secondary"
                   onPointerDown={(e) => e.stopPropagation()}
@@ -656,7 +712,8 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
           <div
             key={i}
             className="ol-opp-hand-enter"
-            onPointerEnter={() => c.templateId && showPreview(`opp-hand-${i}`, c.templateId)}
+            onPointerEnter={(e) => c.templateId && showPreview(e, `opp-hand-${i}`, c.templateId)}
+            onPointerDown={(e) => c.templateId && startDrag(e, { kind: 'view' }, 0, 0, c.templateId)}
             onPointerLeave={hidePreview}
             style={{ position: 'absolute', left: slots[i], top: y, width: SMALL_W, height: SMALL_H, zIndex: 300 + i, transition: 'left 0.3s ease' }}
           >
@@ -690,7 +747,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
         )}
         <div className="life-counter-display">
           {mine && (
-            <button className="life-counter-btn" style={{ width: 36, height: 36 }} onClick={() => setLife(value - 1)} disabled={value <= LIFE_MIN} title="Restar vida">
+            <button className="life-counter-btn" style={{ width: ui.life, height: ui.life, fontSize: isTouch ? 26 : undefined }} onClick={() => setLife(value - 1)} disabled={value <= LIFE_MIN} title="Restar vida">
               −
             </button>
           )}
@@ -698,7 +755,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
             {value}
           </span>
           {mine && (
-            <button className="life-counter-btn" style={{ width: 36, height: 36 }} onClick={() => setLife(value + 1)} disabled={value >= LIFE_MAX} title="Sumar vida">
+            <button className="life-counter-btn" style={{ width: ui.life, height: ui.life, fontSize: isTouch ? 26 : undefined }} onClick={() => setLife(value + 1)} disabled={value >= LIFE_MAX} title="Sumar vida">
               +
             </button>
           )}
@@ -711,7 +768,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
   const ghost = () => {
     if (!drag || !drag.moved) return null;
     const { src } = drag;
-    if (src.kind === 'token') return null;
+    if (src.kind === 'token' || src.kind === 'view') return null;
     const small = src.kind !== 'play';
     const left = drag.x - drag.grabX;
     const top = drag.y - drag.grabY;
@@ -770,8 +827,25 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
           transition: dragged ? 'transform 0.15s, box-shadow 0.15s' : 'left 0.3s ease, top 0.3s ease, transform 0.15s, box-shadow 0.15s',
           cursor: 'grab',
           zIndex: 400000,
+          outline: selectedTokenId === t.id ? '3px solid var(--color-accent)' : 'none',
+          outlineOffset: 3,
         }}
-      />
+      >
+        {selectedTokenId === t.id && !dragged && (
+          <button
+            className="btn-danger"
+            title="Quitar token"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={() => {
+              send({ t: 'tokenDelete', id: t.id });
+              setSelectedTokenId(null);
+            }}
+            style={{ position: 'absolute', left: TOKEN_SIZE + 6, top: -6, width: ui.pile * 0.8, height: ui.pile * 0.8, padding: 0, justifyContent: 'center', borderRadius: '50%' }}
+          >
+            <X size={ui.icon + 2} />
+          </button>
+        )}
+      </div>
     );
   });
 
@@ -798,7 +872,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
   const handRevealed = !!myInfo?.handRevealed;
   const myCardsInGame = state.me.library.count + state.hand.length + state.me.graveyard.length + state.me.play.length > 0;
   const unread = showLog ? 0 : Math.max(0, state.log.length - seenLog);
-  const btn: React.CSSProperties = { padding: '7px 10px', fontSize: 14 };
+  const btn: React.CSSProperties = { padding: ui.pad, fontSize: ui.font };
   // La vista ampliada solo se muestra si la carta sigue donde estaba (y boca arriba)
   const hoverStillThere =
     !!hoverTemplate &&
@@ -806,13 +880,13 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
     (state.hand.some((c) => c.id === hoverTemplate.cardId) ||
       state.oppHand.some((c, i) => `opp-hand-${i}` === hoverTemplate.cardId && c.templateId === hoverTemplate.templateId) ||
       [...state.me.play, ...state.opp.play].some((c) => c.id === hoverTemplate.cardId && c.isFaceUp));
-  const previewTemplate = hoverStillThere ? templateMap.get(hoverTemplate!.templateId) : undefined;
+  const previewTemplate = pressPreview ? templateMap.get(pressPreview) : hoverStillThere ? templateMap.get(hoverTemplate!.templateId) : undefined;
 
   const roomPanel = (
     <div
       className="glass-panel"
       onPointerDown={(e) => e.stopPropagation()}
-      style={{ position: 'absolute', left: 14, top: 14, width: SIDE_W - 28, padding: 16, display: 'flex', flexDirection: 'column', gap: 10, zIndex: 60, fontSize: 14 }}
+      style={{ position: 'absolute', left: 14, top: 14, width: SIDE_W - 28, padding: 16, display: 'flex', flexDirection: 'column', gap: 10, zIndex: 60, fontSize: isTouch ? 18 : 14 }}
     >
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div>
@@ -918,8 +992,10 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
           <LogOut size={14} /> Salir
         </button>
       </div>
-      <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.45 }}>
-        Arrastra las cartas entre tus franjas. R: robar · F: voltear · Q/E: girar · H: a la mano · G: al cementerio
+      <div style={{ fontSize: isTouch ? 15 : 12, color: 'var(--text-muted)', lineHeight: 1.45 }}>
+        {isTouch
+          ? 'Arrastra las cartas con el dedo. Toca una carta para ver sus acciones y mantén pulsado para ampliarla.'
+          : 'Arrastra las cartas entre tus franjas. R: robar · F: voltear · Q/E: girar · H: a la mano · G: al cementerio'}
       </div>
     </div>
   );
@@ -946,19 +1022,19 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
     >
       <span style={{ fontWeight: 600, color: 'var(--text-muted)' }}>Carta:</span>
       <button className="btn-secondary" onClick={flip} title="Voltear (F)" style={btn}>
-        <Eye size={14} /> Voltear
+        <Eye size={ui.icon} /> Voltear
       </button>
       <button className="btn-secondary" onClick={() => rotate(-90)} title="Girar a la izquierda (Q)" style={btn}>
-        <RotateCcw size={14} />
+        <RotateCcw size={ui.icon} />
       </button>
       <button className="btn-secondary" onClick={() => rotate(90)} title="Girar a la derecha (E)" style={btn}>
-        <RotateCw size={14} />
+        <RotateCw size={ui.icon} />
       </button>
       <button className="btn-secondary" onClick={() => moveSelected('hand')} title="A la mano (H)" style={btn}>
-        <Hand size={14} /> A la mano
+        <Hand size={ui.icon} /> A la mano
       </button>
       <button className="btn-secondary" onClick={() => moveSelected('graveyard')} title="Al cementerio (G)" style={btn}>
-        <Archive size={14} /> Cementerio
+        <Archive size={ui.icon} /> Cementerio
       </button>
     </div>
   );
@@ -969,7 +1045,15 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
       <div className="tabletop-texture" />
 
       {/* Mesa escalada: misma disposición para los dos jugadores */}
-      <div ref={areaRef} style={{ position: 'absolute', inset: 0 }} onPointerDown={() => setSelectedId(null)}>
+      <div
+        ref={areaRef}
+        style={{ position: 'absolute', inset: 0 }}
+        onPointerDown={() => {
+          setSelectedId(null);
+          setSelectedHandId(null);
+          setSelectedTokenId(null);
+        }}
+      >
         <div
           ref={boardRef}
           style={{
@@ -980,6 +1064,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
             height: BOARD_H,
             transform: `scale(${fit.scale})`,
             transformOrigin: '0 0',
+            touchAction: 'none', // el dedo arrastra cartas en vez de mover o ampliar la página
           }}
         >
           {(['opp', 'me'] as SideKey[]).flatMap((side) =>
@@ -1080,6 +1165,15 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
                 Enviar
               </button>
             </form>
+          </div>
+        )}
+
+        {isTouch && portrait && (
+          <div
+            className="glass-panel"
+            style={{ position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)', zIndex: 750000, padding: '10px 18px', fontSize: '0.95rem', whiteSpace: 'nowrap' }}
+          >
+            Gira la tablet en horizontal para ver la mesa más grande
           </div>
         )}
 
@@ -1248,7 +1342,6 @@ const pill: React.CSSProperties = {
   boxShadow: '0 4px 10px rgba(0,0,0,0.5)',
 };
 
-const pileBtn: React.CSSProperties = { padding: 6, width: 40, height: 40, justifyContent: 'center' };
 
 const Overlay: React.FC<{ onClose: () => void; children: React.ReactNode }> = ({ onClose, children }) => (
   <div
