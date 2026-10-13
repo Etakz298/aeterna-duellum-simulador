@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowLeft, Globe, LogIn, Plus, Upload } from 'lucide-react';
 import type { CardTemplate } from '../types';
-import type { PeekCard, Seat, ServerLibrary, StateEffects } from './types';
+import type { PeekResult, Seat, ServerLibrary, StateEffects } from './types';
 import { OnlineTable } from './OnlineTable';
 import { loadStoredSession, useOnlineGame } from './useOnlineGame';
 import {
@@ -35,9 +35,8 @@ export const OnlineMode: React.FC<OnlineModeProps> = ({ initialCode, localLibrar
   // Biblioteca leída de la carpeta data/ del simulador (para publicar desde el navegador)
   const [folderLibrary, setFolderLibrary] = useState<OnlineModeProps['localLibrary'] | null>(null);
 
-  const [shufflingIds, setShufflingIds] = useState<Set<string>>(new Set());
   const [selectRequest, setSelectRequest] = useState<string[] | null>(null);
-  const [peek, setPeek] = useState<PeekCard[] | null>(null);
+  const [peek, setPeek] = useState<PeekResult | null>(null);
   const [reveal, setReveal] = useState<{ by: Seat; templateId: string } | null>(null);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const [modal, setModal] = useState<{ title: string; message: string; onConfirm: () => void } | null>(null);
@@ -48,11 +47,6 @@ export const OnlineMode: React.FC<OnlineModeProps> = ({ initialCode, localLibrar
   }, []);
 
   const handleEffects = useCallback((fx: StateEffects) => {
-    if (fx.shuffle?.length) {
-      const ids = new Set(fx.shuffle);
-      setShufflingIds(ids);
-      window.setTimeout(() => setShufflingIds(new Set()), 500);
-    }
     if (fx.reveal) setReveal(fx.reveal);
     // Solo se selecciona automáticamente lo que ha hecho este jugador
     if (fx.select && fx.by === youRef.current) setSelectRequest(fx.select);
@@ -181,13 +175,11 @@ export const OnlineMode: React.FC<OnlineModeProps> = ({ initialCode, localLibrar
           library={library}
           serverUrl={serverUrl}
           send={game.send}
-          moveItems={game.moveItems}
-          flushMoves={game.flushMoves}
           patchState={(fn) => game.setState((s) => (s ? fn(s) : s))}
-          shufflingIds={shufflingIds}
           selectRequest={selectRequest}
           peek={peek}
           onClosePeek={() => setPeek(null)}
+          onPeekTaken={(id) => setPeek((p) => (p ? { ...p, cards: p.cards.filter((c) => c.id !== id) } : p))}
           reveal={reveal}
           onCloseReveal={() => setReveal(null)}
           onReloadLibrary={() => loadLibrary(serverUrl)}

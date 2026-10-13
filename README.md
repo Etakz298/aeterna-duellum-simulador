@@ -8,23 +8,25 @@ Simulador de mesa para Aeterna Duellum. Funciona como app de escritorio (Electro
 - **Online 1 contra 1**: botón *Jugar Online (1 vs 1)* en el menú lateral.
   - Un jugador crea una sala y comparte el código (o el enlace de invitación `https://<servidor>/?sala=CODIGO`).
   - Cada uno elige su mazo y pulsa *Poner mi mazo barajado en la mesa*.
-  - La mesa es compartida; cada jugador tiene su **mano privada** abajo. Del rival solo se ve cuántas cartas tiene y sus reversos.
+  - La mesa tiene zonas fijas y se escala a la ventana, así los dos jugadores la ven igual sea cual sea su resolución. Tu rival aparece enfrente (girado 180º).
+  - Cada jugador tiene: **Biblioteca** (a la izquierda de la mano), **Mano** (privada), **Cementerio** (a la derecha: las cartas quedan boca abajo, giradas 90º a la izquierda y la última arriba) y su **Zona de juego**.
+  - Las cartas nunca salen de las zonas. Puedes coger una carta de la zona de juego o del cementerio del rival y llevarla a tu mano, tu zona de juego o tu cementerio.
+  - Vida fija a los lados: la tuya a la izquierda (solo tú puedes cambiarla) y la del rival a la derecha.
+  - **Tokens**: fichas amarillas que se ponen encima de las cartas y se mueven libremente. Doble clic o clic derecho para quitarlas.
   - El servidor es el único que sabe qué carta es cada carta boca abajo: los navegadores no reciben esa información hasta que la carta se voltea, así que no se puede hacer trampa mirando el tráfico.
-  - Barajar se hace en el servidor y renueva los identificadores de las cartas.
-  - Registro de la partida y chat a la derecha (robar, barajar, mirar cartas, enseñar…).
+  - Registro de la partida y chat en el botón *Chat*.
   - Si se cierra la ventana o se cae la conexión, al volver se recupera el sitio en la sala.
 
 ### Controles online
 
 | Acción | Cómo |
 | --- | --- |
-| Robar de tu mazo | Botón *Robar* o tecla **R** |
-| Robar la carta de arriba de un montón concreto | Doble clic en el montón y **R** |
-| Coger cartas de la mesa a la mano | Arrastrarlas hasta tu mano, o seleccionarlas y **H** |
-| Jugar una carta | Arrastrarla de la mano a la mesa (boca arriba; con **Mayús** o el botón de la mano, boca abajo) |
-| Mirar en privado cartas tuyas boca abajo (buscar en el mazo) | Seleccionarlas y *Mirar*. El rival ve en el registro que lo haces |
+| Robar | Clic en tu biblioteca o tecla **R** |
+| Jugar una carta | Arrastrarla de la mano a tu zona de juego (boca arriba; con **Mayús** o el botón de la barra, boca abajo) |
+| Mover cartas | Arrastrar entre tus zonas; dentro de tu zona de juego se colocan donde quieras |
+| Mirar tu biblioteca o cementerio | Botón de la lupa junto al montón. El rival ve en el registro que lo haces |
 | Enseñar una carta de la mano sin jugarla | Pasar el ratón por encima y *Enseñar* |
-| Voltear, rotar, barajar, retirar | **F**, **Q/E**, **Z**, **Supr** (igual que en un jugador) |
+| Carta seleccionada | **F** voltear, **Q/E** girar, **H** a la mano, **G** al cementerio |
 
 ## Servidor online
 
