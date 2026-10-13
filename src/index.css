@@ -518,3 +518,11 @@ button {
   0% { transform: scale(1.35); color: #c4b5fd; }
   100% { transform: scale(1); }
 }
+
+/* Tablets: sin rebote ni zoom por doble toque en la página */
+html,
+body {
+  overscroll-behavior: none;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
