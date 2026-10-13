@@ -129,6 +129,7 @@ export async function publishLibrary(
         deckId: t.deckId,
         backType: t.backType,
         quantity: t.quantity,
+        isSpecial: !!t.isSpecial,
         image: `${t.id}.webp`,
       })),
       backs,

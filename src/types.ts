@@ -6,6 +6,7 @@ export interface CardTemplate {
   deckId: string; // 'mazo1' | 'mazo2' | 'mazo3' | 'mazo4'
   backType: 'backA' | 'backB';
   quantity: number; // Number of copies of this card in the deck
+  isSpecial?: boolean; // Special cards always go on top of the deck
   createdAt: number;
 }
 

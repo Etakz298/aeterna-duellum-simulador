@@ -390,6 +390,23 @@ export default function App() {
     );
   };
 
+  // Mark/unmark a template as special (always on top of the deck)
+  const handleUpdateTemplateSpecial = async (id: string, isSpecial: boolean) => {
+    setTemplates((prev) =>
+      prev.map((t) => {
+        if (t.id === id) {
+          const updated = { ...t, isSpecial };
+          saveCardTemplate(updated); // Sync back to storage
+          return updated;
+        }
+        return t;
+      })
+    );
+  };
+
+  const isSpecialTemplate = (templateId: string) =>
+    !!templates.find((t) => t.id === templateId)?.isSpecial;
+
   // Add card copies to board tabletop
   const handleAddCardsToBoard = (templateId: string, count: number) => {
     let startZ = nextZIndex;
@@ -427,7 +444,9 @@ export default function App() {
     const spawnX = 450 + Math.random() * 20;
     const spawnY = 250 + Math.random() * 20;
 
-    deckTemplates.forEach((template) => {
+    // Special cards are added last so they end up on top of the pile
+    const ordered = [...deckTemplates.filter((t) => !t.isSpecial), ...deckTemplates.filter((t) => t.isSpecial)];
+    ordered.forEach((template) => {
       const quantity = template.quantity || 1;
       for (let i = 0; i < quantity; i++) {
         startZ++;
@@ -626,6 +645,8 @@ export default function App() {
       const j = Math.floor(Math.random() * (i + 1));
       [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
     }
+    // Special cards stay on top after shuffling
+    shuffled.sort((a, b) => Number(isSpecialTemplate(a.templateId)) - Number(isSpecialTemplate(b.templateId)));
 
     let startZ = nextZIndex;
     const updatedCards = cards.map((c) => {
@@ -685,6 +706,7 @@ export default function App() {
         onUpdateTemplateDeck={handleUpdateTemplateDeck}
         onUpdateTemplateBackType={handleUpdateTemplateBackType}
         onUpdateTemplateQuantity={handleUpdateTemplateQuantity}
+        onUpdateTemplateSpecial={handleUpdateTemplateSpecial}
         onAddCardsToBoard={handleAddCardsToBoard}
         onAddDeckToBoard={handleAddDeckToBoard}
         onAddCounter={handleAddCounter}
