@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import type { CardTemplate } from '../types';
-import { Trash2, Upload, UserPlus, Search, HelpCircle, Edit2, ChevronLeft, ChevronRight, Globe } from 'lucide-react';
+import { Trash2, Upload, UserPlus, Search, HelpCircle, Edit2, ChevronLeft, ChevronRight, Globe, Download } from 'lucide-react';
 import UTIF from 'utif';
 
 // TIFF decoding to standard PNG Blob helper
@@ -69,6 +69,8 @@ interface SidebarProps {
   onDeleteBack: (deckId: string, id: 'backA' | 'backB') => Promise<void>;
   showAlert: (title: string, message: string) => void;
   onOpenOnline?: () => void;
+  onImportServerDecks?: () => void;
+  importProgress?: { done: number; total: number } | null;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -94,6 +96,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onDeleteBack,
   showAlert,
   onOpenOnline,
+  onImportServerDecks,
+  importProgress,
 }) => {
   // Navigation & UI States
   const [searchQuery, setSearchQuery] = useState('');
@@ -392,6 +396,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
               style={{ width: '100%', padding: '10px', fontSize: '0.85rem', marginBottom: '8px' }}
             >
               <Globe size={16} /> Jugar Online (1 vs 1)
+            </button>
+          )}
+          {onImportServerDecks && (
+            <button
+              className="btn-secondary"
+              onClick={onImportServerDecks}
+              disabled={!!importProgress}
+              title="Copia en este ordenador los mazos publicados para el 1 vs 1"
+              style={{ width: '100%', padding: '10px', fontSize: '0.85rem', marginBottom: '8px' }}
+            >
+              <Download size={16} />{' '}
+              {importProgress ? `Trayendo cartas ${importProgress.done}/${importProgress.total}…` : 'Traer mazos del 1 vs 1'}
             </button>
           )}
           <div style={{ display: 'flex', gap: '8px' }}>

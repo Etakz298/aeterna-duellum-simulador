@@ -5,6 +5,7 @@ Simulador de mesa para Aeterna Duellum. Funciona como app de escritorio (Electro
 ## Modos de juego
 
 - **Un jugador**: el de siempre. Biblioteca de mazos, mesa libre, contadores. Todo se guarda en local (`data/` junto al .exe, o el navegador).
+  - *Traer mazos del 1 vs 1* copia en este ordenador los mazos publicados en el servidor (cartas, cantidades y dorsos), para usarlos también en un jugador. Si ya hay un mazo con el mismo nombre, pregunta antes de cambiar sus cartas.
 - **Online 1 contra 1**: botón *Jugar Online (1 vs 1)* en el menú lateral.
   - Un jugador crea una sala y comparte el código (o el enlace de invitación `https://<servidor>/?sala=CODIGO`).
   - Cada uno elige su mazo y pulsa *Poner mi mazo barajado en la mesa*.
