@@ -13,6 +13,7 @@ import {
 import { RotateCw, RotateCcw, Eye, Shuffle, Trash2 } from 'lucide-react';
 import { OnlineMode } from './online/OnlineMode';
 import { loadStoredSession } from './online/useOnlineGame';
+import { fetchLibrary, getDefaultServerUrl } from './online/server';
 
 // Un enlace de invitación (?sala=CODIGO) o una partida a medias abren el modo online
 const initialSala = new URLSearchParams(window.location.search).get('sala')?.toUpperCase() || undefined;
@@ -264,6 +265,135 @@ export default function App() {
         saveDeckNamesState(updated);
       }
     );
+  };
+
+  // Traer los mazos publicados en el servidor del 1 vs 1 a la biblioteca de este ordenador
+  const [importProgress, setImportProgress] = useState<{ done: number; total: number } | null>(null);
+
+  const handleImportServerDecks = async () => {
+    const serverUrl = getDefaultServerUrl();
+    if (!serverUrl) {
+      showAlert('Sin servidor', 'Entra una vez en "Jugar Online (1 vs 1)" y conéctate al servidor; después podrás traer sus mazos desde aquí.');
+      return;
+    }
+    let lib;
+    try {
+      lib = await fetchLibrary(serverUrl);
+    } catch {
+      showAlert('Sin conexión', 'No se ha podido leer el servidor del 1 vs 1. Comprueba la conexión e inténtalo de nuevo.');
+      return;
+    }
+    const serverDecks = Object.keys(lib.deckNames).filter((d) => lib.templates.some((t) => t.deckId === d));
+    if (serverDecks.length === 0) {
+      showAlert('Sin mazos', 'Todavía no hay mazos publicados en el servidor del 1 vs 1.');
+      return;
+    }
+
+    // Cada mazo del servidor va a un mazo local con el mismo nombre, o al mismo
+    // identificador si está libre o vacío; si no, a un mazo nuevo.
+    const usedIds = new Set(Object.keys(deckNames));
+    const target: Record<string, string> = {};
+    for (const d of serverDecks) {
+      const name = lib.deckNames[d].trim().toLowerCase();
+      const sameName = Object.keys(deckNames).find((id) => (deckNames[id] || '').trim().toLowerCase() === name);
+      const idFree = !usedIds.has(d) || !templates.some((t) => t.deckId === d);
+      const id = sameName || (idFree ? d : `deck-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`);
+      target[d] = id;
+      usedIds.add(id);
+    }
+    const replaced = serverDecks
+      .filter((d) => templates.some((t) => t.deckId === target[d]))
+      .map((d) => deckNames[target[d]] || target[d]);
+
+    const run = async () => {
+      const jobs = lib.templates.filter((t) => t.imageUrl && target[t.deckId]);
+      const backJobs = Object.entries(lib.backs).flatMap(([key, url]) => {
+        const m = key.match(/^(backA|backB)-(.+)$/);
+        return m && target[m[2]] ? [{ id: `${m[1]}-${target[m[2]]}`, url }] : [];
+      });
+      const total = jobs.length + backJobs.length;
+      let done = 0;
+      setImportProgress({ done, total });
+      try {
+        const download = async (url: string) => {
+          const res = await fetch(url);
+          if (!res.ok) throw new Error(`El servidor respondió ${res.status}`);
+          return res.blob();
+        };
+
+        // Descargar primero todo; así un fallo de red no deja los mazos a medias
+        const blobs = new Map<string, Blob>();
+        const queue: { key: string; url: string }[] = [
+          ...jobs.map((t) => ({ key: t.id, url: t.imageUrl! })),
+          ...backJobs.map((b) => ({ key: b.id, url: b.url })),
+        ];
+        const worker = async () => {
+          for (let job = queue.shift(); job; job = queue.shift()) {
+            blobs.set(job.key, await download(job.url));
+            setImportProgress({ done: ++done, total });
+          }
+        };
+        await Promise.all([worker(), worker(), worker(), worker()]);
+
+        const targetIds = new Set(Object.values(target));
+        const old = templates.filter((t) => targetIds.has(t.deckId));
+        for (const t of old) {
+          await deleteCardTemplate(t.id);
+          if (t.imageUrl?.startsWith('blob:')) URL.revokeObjectURL(t.imageUrl);
+        }
+
+        const added: CardTemplate[] = [];
+        for (const t of jobs) {
+          const template: CardTemplate = {
+            id: t.id,
+            name: t.name,
+            imageBlob: blobs.get(t.id),
+            deckId: target[t.deckId],
+            backType: t.backType,
+            quantity: t.quantity,
+            isSpecial: !!t.isSpecial,
+            createdAt: t.createdAt || Date.now(),
+          };
+          await saveCardTemplate(template);
+          if (!template.imageUrl) template.imageUrl = URL.createObjectURL(template.imageBlob!);
+          added.push(template);
+        }
+
+        const newBackUrls: Record<string, string> = {};
+        for (const b of backJobs) {
+          const back: CardBack = { id: b.id, imageBlob: blobs.get(b.id) };
+          await saveCardBack(back);
+          if (backUrls[b.id]?.startsWith('blob:')) URL.revokeObjectURL(backUrls[b.id]);
+          newBackUrls[b.id] = back.imageUrl || URL.createObjectURL(back.imageBlob!);
+        }
+
+        const addedIds = new Set(added.map((t) => t.id));
+        const removedIds = new Set(old.map((t) => t.id).filter((id) => !addedIds.has(id)));
+        setCards((prev) => prev.filter((c) => !removedIds.has(c.templateId)));
+        setTemplates((prev) => [...prev.filter((t) => !targetIds.has(t.deckId) && !addedIds.has(t.id)), ...added]);
+        setBackUrls((prev) => ({ ...prev, ...newBackUrls }));
+        const names = { ...deckNames };
+        for (const d of serverDecks) names[target[d]] = lib.deckNames[d];
+        saveDeckNamesState(names);
+
+        showAlert('Mazos traídos', `Ya tienes en este ordenador: ${serverDecks.map((d) => lib.deckNames[d]).join(', ')}.`);
+      } catch (err) {
+        console.error(err);
+        showAlert('No se han podido traer', 'Ha fallado la descarga de alguna carta. No se ha cambiado nada; inténtalo de nuevo.');
+      } finally {
+        setImportProgress(null);
+      }
+    };
+
+    if (replaced.length > 0) {
+      showConfirm(
+        'Traer mazos del 1 vs 1',
+        `Se cambiarán las cartas de estos mazos de este ordenador por las del servidor: ${replaced.join(', ')}. ¿Continuar?`,
+        run,
+      );
+    } else {
+      run();
+    }
   };
 
   // Upload Custom Back per Deck
@@ -716,6 +846,8 @@ export default function App() {
         onDeleteBack={handleDeleteBack}
         showAlert={showAlert}
         onOpenOnline={() => setMode('online')}
+        onImportServerDecks={handleImportServerDecks}
+        importProgress={importProgress}
       />
 
       {/* Floating Toolbar */}
