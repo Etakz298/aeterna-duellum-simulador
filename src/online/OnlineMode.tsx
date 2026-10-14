@@ -374,7 +374,7 @@ function clearSalaFromUrl() {
   }
 }
 
-const Toast: React.FC<{ message: string }> = ({ message }) => (
+export const Toast: React.FC<{ message: string }> = ({ message }) => (
   <div
     className="glass-panel"
     style={{
@@ -394,7 +394,7 @@ const Toast: React.FC<{ message: string }> = ({ message }) => (
   </div>
 );
 
-const ConfirmModal: React.FC<{
+export const ConfirmModal: React.FC<{
   title: string;
   message: string;
   confirmLabel?: string;

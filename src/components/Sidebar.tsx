@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import type { CardTemplate } from '../types';
-import { Trash2, Upload, UserPlus, Search, HelpCircle, Edit2, ChevronLeft, ChevronRight, Globe, Download } from 'lucide-react';
+import { Trash2, Upload, UserPlus, Search, HelpCircle, Edit2, ChevronLeft, ChevronRight, Globe, Download, Swords } from 'lucide-react';
 import UTIF from 'utif';
 
 // TIFF decoding to standard PNG Blob helper
@@ -69,6 +69,7 @@ interface SidebarProps {
   onDeleteBack: (deckId: string, id: 'backA' | 'backB') => Promise<void>;
   showAlert: (title: string, message: string) => void;
   onOpenOnline?: () => void;
+  onOpenSolo?: () => void;
   onImportServerDecks?: () => void;
   importProgress?: { done: number; total: number } | null;
 }
@@ -96,6 +97,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onDeleteBack,
   showAlert,
   onOpenOnline,
+  onOpenSolo,
   onImportServerDecks,
   importProgress,
 }) => {
@@ -389,6 +391,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
         
         {/* Game Utilities */}
         <section>
+          {onOpenSolo && (
+            <button
+              className="btn-primary"
+              onClick={onOpenSolo}
+              style={{ width: '100%', padding: '10px', fontSize: '0.85rem', marginBottom: '8px' }}
+            >
+              <Swords size={16} /> Jugar (un jugador)
+            </button>
+          )}
           {onOpenOnline && (
             <button
               className="btn-primary"
