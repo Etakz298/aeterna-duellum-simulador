@@ -7,7 +7,17 @@
 // punto de vista de su dueño, así ambos jugadores ven la mesa igual sea cual sea
 // su resolución.
 
-import crypto from 'node:crypto';
+// Solo usa Web Crypto (globalThis.crypto): así el mismo motor funciona en el
+// servidor (Node 22) y en el navegador para el modo un jugador.
+const webcrypto = globalThis.crypto;
+const randomHex = (bytes) => Array.from(webcrypto.getRandomValues(new Uint8Array(bytes)), (b) => b.toString(16).padStart(2, '0')).join('');
+const randomInt = (max) => {
+  const limit = Math.floor(0x100000000 / max) * max;
+  const buf = new Uint32Array(1);
+  do webcrypto.getRandomValues(buf);
+  while (buf[0] >= limit);
+  return buf[0] % max;
+};
 
 export const SEATS = ['p1', 'p2'];
 const LOG_LIMIT = 80;
@@ -27,22 +37,24 @@ const LIFE_START = 10;
 const ZONES = ['library', 'hand', 'play', 'graveyard'];
 const ZONE_NAMES = { library: 'su biblioteca', hand: 'su mano', play: 'su zona de juego', graveyard: 'su cementerio' };
 
-const randomId = (prefix) => `${prefix}-${crypto.randomBytes(6).toString('hex')}`;
+const randomId = (prefix) => `${prefix}-${randomHex(6)}`;
 const other = (seat) => (seat === 'p1' ? 'p2' : 'p1');
 const isNum = (n) => typeof n === 'number' && Number.isFinite(n);
 const clamp = (n, min, max) => Math.max(min, Math.min(max, n));
 
 function shuffleInPlace(arr) {
   for (let i = arr.length - 1; i > 0; i--) {
-    const j = crypto.randomInt(i + 1);
+    const j = randomInt(i + 1);
     [arr[i], arr[j]] = [arr[j], arr[i]];
   }
   return arr;
 }
 
 export class Game {
-  constructor(code) {
+  // free: modo un jugador, una sola persona mueve las cartas de los dos jugadores
+  constructor(code, { free = false } = {}) {
     this.code = code;
+    this.free = free;
     this.players = {}; // seat -> { name, token, deckId, connected, left }
     // Carta: { id, templateId, deckId, backType, isSpecial, owner, side, zone, order, x, y, isFaceUp, rotation }
     // owner = de quién es el mazo; side = en las zonas de qué jugador está
@@ -60,7 +72,7 @@ export class Game {
   addPlayer(name) {
     const seat = SEATS.find((s) => !this.players[s]);
     if (!seat) return null;
-    const token = crypto.randomBytes(16).toString('hex');
+    const token = randomHex(16);
     this.players[seat] = { name, token, deckId: null, connected: false, handRevealed: false };
     this.addLog(`${name} se ha unido a la sala.`);
     return { seat, token };
@@ -269,14 +281,15 @@ export class Game {
 
     let card;
     if (msg.from === 'library') {
-      card = this.topOf(seat, 'library');
+      const libSide = this.free && SEATS.includes(msg.fromSide) ? msg.fromSide : seat;
+      card = this.topOf(libSide, 'library');
       if (!card) throw new Error('Tu biblioteca está vacía');
     } else {
       card = this.cards.get(msg.id);
       if (!card) throw new Error('Esa carta ya no está ahí');
       const own = card.side === seat;
       const publicZone = card.zone === 'play' || card.zone === 'graveyard';
-      if (!own && !publicZone) throw new Error('No puedes coger esa carta');
+      if (!own && !publicZone && !this.free) throw new Error('No puedes coger esa carta');
       if (card.zone === 'library') throw new Error('Coge las cartas de la biblioteca desde arriba');
     }
 

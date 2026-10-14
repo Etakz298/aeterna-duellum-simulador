@@ -20,6 +20,7 @@ const SEATS: Seat[] = ['p1', 'p2'];
 function summarize(list: MatchResult[]) {
   const byPlayer = new Map<string, Row>();
   const byDeck = new Map<string, Row>();
+  const byChampion = new Map<string, Row>();
   const add = (map: Map<string, Row>, key: string, label: string, outcome: 'won' | 'lost' | 'draw') => {
     const row = map.get(key) || { key, label, played: 0, won: 0, lost: 0, draw: 0 };
     row.played++;
@@ -34,22 +35,31 @@ function summarize(list: MatchResult[]) {
       add(byPlayer, p.name.toLowerCase(), p.name, outcome);
       const deck = p.deck || 'Sin mazo';
       add(byDeck, `${p.name.toLowerCase()}|${deck}`, `${p.name} con ${deck}`, outcome);
+      add(byChampion, deck.toLowerCase(), deck, outcome);
     }
   }
   const sort = (rows: Row[]) => rows.sort((a, b) => b.won - a.won || a.lost - b.lost || b.played - a.played);
-  return { players: sort([...byPlayer.values()]), decks: sort([...byDeck.values()]) };
+  return { players: sort([...byPlayer.values()]), decks: sort([...byDeck.values()]), champions: sort([...byChampion.values()]) };
 }
 
-export const MatchHistory: React.FC<{ serverUrl: string; roomCode?: string; onClose: () => void }> = ({ serverUrl, roomCode, onClose }) => {
-  const [results, setResults] = useState<MatchResult[] | null>(null);
+// localResults: historial del modo un jugador (guardado en este ordenador)
+export const MatchHistory: React.FC<{ serverUrl: string; roomCode?: string; localResults?: MatchResult[]; onClose: () => void }> = ({
+  serverUrl,
+  roomCode,
+  localResults,
+  onClose,
+}) => {
+  const solo = !!localResults;
+  const [results, setResults] = useState<MatchResult[] | null>(localResults || null);
   const [error, setError] = useState<string | null>(null);
-  const [filter, setFilter] = useState<Filter>(roomCode ? 'room' : 'today');
+  const [filter, setFilter] = useState<Filter>(roomCode ? 'room' : solo ? 'all' : 'today');
 
   useEffect(() => {
+    if (solo) return;
     fetchResults(serverUrl)
       .then(setResults)
       .catch(() => setError('No se ha podido cargar el historial del servidor.'));
-  }, [serverUrl]);
+  }, [serverUrl, solo]);
 
   const list = useMemo(() => {
     if (!results) return [];
@@ -130,17 +140,19 @@ export const MatchHistory: React.FC<{ serverUrl: string; roomCode?: string; onCl
         {!error && !results && <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Cargando…</p>}
         {results && list.length === 0 && (
           <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-            Todavía no hay partidas registradas aquí. Al acabar una partida, pulsa "Terminar partida" en el panel de la sala.
+            Todavía no hay partidas registradas aquí. Al acabar una partida, pulsa "Terminar partida" en el panel{solo ? '' : ' de la sala'}.
           </p>
         )}
         {list.length > 0 && (
           <>
-            {table('Jugadores', summary.players)}
-            {table('Jugadores y mazos', summary.decks)}
+            {table('Campeones', summary.champions)}
+            {!solo && table('Jugadores', summary.players)}
+            {!solo && table('Jugadores y mazos', summary.decks)}
             <div>
               <h4 style={{ fontSize: '0.85rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>Partidas</h4>
               {list.map((m) => {
-                const name = (s: Seat) => `${m.players[s].name}${m.players[s].deck ? ` (${m.players[s].deck})` : ''}`;
+                const name = (s: Seat) =>
+                  solo ? m.players[s].deck || m.players[s].name : `${m.players[s].name}${m.players[s].deck ? ` (${m.players[s].deck})` : ''}`;
                 return (
                   <div key={m.id} style={{ borderTop: '1px solid var(--glass-border)', padding: '6px 0', fontSize: '0.82rem', display: 'flex', gap: 10 }}>
                     <span style={{ color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>

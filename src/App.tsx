@@ -12,6 +12,7 @@ import {
 } from './db';
 import { RotateCw, RotateCcw, Eye, Shuffle, Trash2 } from 'lucide-react';
 import { OnlineMode } from './online/OnlineMode';
+import { SoloMode } from './local/SoloMode';
 import { loadStoredSession } from './online/useOnlineGame';
 import { fetchLibrary, getDefaultServerUrl } from './online/server';
 
@@ -82,10 +83,12 @@ export default function App() {
   // Sidebar visibility state
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(true);
 
-  // Game mode: local single player or online 1 vs 1
-  const [mode, setMode] = useState<'local' | 'online'>(() =>
-    initialSala || loadStoredSession() ? 'online' : 'local'
+  // Modo: un jugador (mesa como la del 1 vs 1), biblioteca de mazos (la mesa libre
+  // de siempre, con el menú para gestionar cartas) u online 1 vs 1
+  const [mode, setMode] = useState<'solo' | 'local' | 'online'>(() =>
+    initialSala || loadStoredSession() ? 'online' : 'solo'
   );
+  const [libraryLoaded, setLibraryLoaded] = useState(false);
 
   // Check if running inside Electron wrapper
   const isElectron = typeof window !== 'undefined' && !!window.electronAPI;
@@ -191,6 +194,7 @@ export default function App() {
       } catch (err) {
         console.error('Error loading initial data:', err);
       }
+      setLibraryLoaded(true);
     };
     loadAllData();
   }, []);
@@ -815,9 +819,15 @@ export default function App() {
       <OnlineMode
         initialCode={initialSala}
         localLibrary={{ templates, backUrls, deckNames }}
-        onExit={() => setMode('local')}
+        onExit={() => setMode('solo')}
       />
     );
+  }
+
+  if (mode === 'solo') {
+    // Esperar a la biblioteca para no borrar de la mesa cartas que aún no se han cargado
+    if (!libraryLoaded) return null;
+    return <SoloMode localLibrary={{ templates, backUrls, deckNames }} onOpenLibrary={() => setMode('local')} onOpenOnline={() => setMode('online')} />;
   }
 
   return (
@@ -846,6 +856,7 @@ export default function App() {
         onDeleteBack={handleDeleteBack}
         showAlert={showAlert}
         onOpenOnline={() => setMode('online')}
+        onOpenSolo={() => setMode('solo')}
         onImportServerDecks={handleImportServerDecks}
         importProgress={importProgress}
       />

@@ -64,7 +64,7 @@ export interface OnlineState {
   me: OnlineSide;
   opp: OnlineSide;
   hand: OnlineHandCard[];
-  oppHand: (CardBackInfo & { templateId?: string })[]; // templateId solo si el rival enseña su mano
+  oppHand: (CardBackInfo & { templateId?: string; id?: string })[]; // templateId solo si el rival enseña su mano (id solo en un jugador)
   life: { me: number; opp: number };
   tokens: OnlineToken[];
   log: LogEntry[];
@@ -94,6 +94,7 @@ export interface PeekCard {
 
 export interface PeekResult {
   zone: 'library' | 'graveyard';
+  side?: Seat; // en un jugador: de quién es lo que se mira
   cards: PeekCard[];
 }
 
