@@ -5,6 +5,7 @@ Simulador de mesa para Aeterna Duellum. Funciona como app de escritorio (Electro
 ## Modos de juego
 
 - **Un jugador**: la misma mesa que el 1 contra 1, pero controlas a los dos jugadores: ves las dos manos y mueves las cartas de los dos lados. Eliges un mazo para cada lado, hay tokens, vidas, registro y **Terminar partida** guarda qué campeón (mazo) ha ganado en un historial de este ordenador. La partida se guarda sola y sigue ahí al recargar.
+  - Los mazos publicados en el servidor del 1 vs 1 se copian solos al abrir la app (y al volver de online) cuando han cambiado, así un jugador y online tienen siempre los mismos mazos.
   - El botón *Mazos* abre la biblioteca de siempre (importar cartas, cantidades, dorsos y la mesa libre antigua). Todo se guarda en local (`data/` junto al .exe, o el navegador).
   - *Traer mazos del 1 vs 1* copia en este ordenador los mazos publicados en el servidor (cartas, cantidades y dorsos), para usarlos también en un jugador. Si ya hay un mazo con el mismo nombre, pregunta antes de cambiar sus cartas.
 - **Online 1 contra 1**: botón *Jugar Online (1 vs 1)* en el menú lateral.
@@ -19,7 +20,7 @@ Simulador de mesa para Aeterna Duellum. Funciona como app de escritorio (Electro
   - Registro de la partida y chat en el botón *Chat*.
   - **Enseñar mi mano**: botón en tu mano para que el rival vea todas tus cartas hasta que pulses *Ocultar mi mano*.
   - **Terminar partida**: pregunta quién ha ganado y lo guarda en el **Historial** (por sala, de hoy o todas), con victorias y derrotas por jugador y por mazo. El historial se guarda en el servidor junto a los mazos publicados, así que en Railway necesita el volumen para no perderse.
-  - **Móvil**: la mesa se ve entera y el panel pasa a un botón de menú (☰). Al tocar una carta, la biblioteca, el cementerio o una vida aparecen sus acciones en grande en el centro. El botón de pantalla completa quita las barras del navegador (en iPhone: Compartir → *Añadir a pantalla de inicio* y abrirlo desde ese icono).
+  - **Móvil**: las zonas de juego se dibujan más bajas para que las manos y los montones se vean más grandes; la mesa se ve entera y el panel pasa a un botón de menú (☰). Al tocar una carta, la biblioteca, el cementerio o una vida aparecen sus acciones en grande en el centro. El botón de pantalla completa quita las barras del navegador (en iPhone: Compartir → *Añadir a pantalla de inicio* y abrirlo desde ese icono).
   - **Tablet**: arrastra con el dedo; toca una carta de la mano para *Enseñar* o *Jugar boca abajo*; mantén pulsada una carta para verla en grande; toca la biblioteca para robar y un token para quitarlo. Mejor en horizontal.
   - Si se cierra la ventana o se cae la conexión, al volver se recupera el sitio en la sala.
 
