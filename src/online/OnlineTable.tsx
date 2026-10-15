@@ -1646,6 +1646,10 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
               borderRadius: 12,
               boxShadow: '0 20px 50px rgba(0,0,0,0.8)',
               zIndex: 600000,
+              // Mientras se arrastra una carta se vuelve translúcida para ver las zonas de debajo
+              opacity: drag?.moved ? 0.25 : 1,
+              pointerEvents: drag?.moved ? 'none' : undefined,
+              transition: 'opacity 0.15s',
             }}
           />
         )}
