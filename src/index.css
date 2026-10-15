@@ -534,3 +534,12 @@ html.js-h body,
 html.js-h #root {
   height: var(--app-h);
 }
+
+/* Móvil: vista de la carta tocada */
+@keyframes ol-tap-preview-in {
+  from { opacity: 0; transform: translateX(30px); }
+  to { opacity: 1; transform: none; }
+}
+.ol-tap-preview {
+  animation: ol-tap-preview-in 0.18s ease-out;
+}
