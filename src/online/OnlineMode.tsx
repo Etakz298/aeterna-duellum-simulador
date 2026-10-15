@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowLeft, Globe, History, LogIn, Plus, Upload } from 'lucide-react';
+import { ArrowLeft, Globe, History, LogIn, Maximize, Minimize, Plus, Upload } from 'lucide-react';
+import { IOS_FULLSCREEN_HINT, fullscreenSupported, toggleFullscreen, useIsFullscreen } from '../fullscreen';
 import type { CardTemplate } from '../types';
 import type { PeekResult, Seat, ServerLibrary, StateEffects } from './types';
 import { OnlineTable } from './OnlineTable';
@@ -41,6 +42,7 @@ export const OnlineMode: React.FC<OnlineModeProps> = ({ initialCode, localLibrar
   const [peek, setPeek] = useState<PeekResult | null>(null);
   const [reveal, setReveal] = useState<{ by: Seat; templateId: string } | null>(null);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const fullscreen = useIsFullscreen();
   const [modal, setModal] = useState<{ title: string; message: string; onConfirm: () => void } | null>(null);
 
   const toast = useCallback((message: string) => {
@@ -238,9 +240,22 @@ export const OnlineMode: React.FC<OnlineModeProps> = ({ initialCode, localLibrar
     <div className="tabletop-container" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'default' }}>
       <div className="glass-panel" style={{ width: 'min(440px, 92vw)', padding: 28, display: 'flex', flexDirection: 'column', gap: 18, maxHeight: '94vh', overflowY: 'auto' }}>
         <div>
-          <h1 style={{ fontSize: '1.4rem', fontWeight: 700, letterSpacing: '-0.5px' }}>
-            Aeterna <span style={{ color: 'var(--color-accent)' }}>Duellum</span> · Online
-          </h1>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+            <h1 style={{ fontSize: '1.4rem', fontWeight: 700, letterSpacing: '-0.5px' }}>
+              Aeterna <span style={{ color: 'var(--color-accent)' }}>Duellum</span> · Online
+            </h1>
+            <button
+              className="btn-secondary"
+              title="Pantalla completa"
+              style={{ padding: 8, flexShrink: 0 }}
+              onClick={async () => {
+                if (!fullscreenSupported()) return toast(IOS_FULLSCREEN_HINT);
+                if (!(await toggleFullscreen())) toast('El navegador no ha permitido la pantalla completa');
+              }}
+            >
+              {fullscreen ? <Minimize size={16} /> : <Maximize size={16} />}
+            </button>
+          </div>
           <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: 4 }}>
             Partida 1 contra 1. Cada jugador ve solo su propia mano; del rival solo ves cuántas cartas tiene.
           </p>

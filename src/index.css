@@ -47,6 +47,7 @@
 body, html, #root {
   width: 100vw;
   height: 100vh;
+  height: 100dvh; /* en móvil, sin contar la barra del navegador */
   overflow: hidden;
   background-color: var(--bg-tabletop);
   color: var(--text-main);
