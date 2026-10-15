@@ -527,3 +527,10 @@ body {
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
 }
+
+/* Alto medido desde JS (ver main.tsx) */
+html.js-h,
+html.js-h body,
+html.js-h #root {
+  height: var(--app-h);
+}

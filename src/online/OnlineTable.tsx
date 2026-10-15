@@ -39,8 +39,8 @@ import {
   TOKEN_SIZE,
   clamp,
   inRect,
-  playCardPos,
-  zoneRect,
+  makeLayout,
+  zoneRect as stdZoneRect,
   type Rect,
   type SideKey,
   type ZoneKey,
@@ -156,10 +156,13 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
   const areaRef = useRef<HTMLDivElement>(null);
   const boardRef = useRef<HTMLDivElement>(null);
   const logEndRef = useRef<HTMLDivElement>(null);
-  const [fit, setFit] = useState({ scale: 1, left: 0, top: 0 });
+  const [fit, setFit] = useState({ scale: 1, left: 0, top: 0, compact: false });
   // Pantalla pequeña (móvil): la mesa se ve muy reducida, así que el panel y las
   // acciones salen a tamaño normal fuera de la mesa
-  const compact = fit.scale < 0.55;
+  const compact = fit.compact;
+  // En móvil las zonas de juego se dibujan más bajas (ver layout.ts)
+  const L = useMemo(() => makeLayout(compact), [compact]);
+  const zoneRect = L.zoneRect;
   const [menuOpen, setMenuOpen] = useState(false);
   const [pileSel, setPileSel] = useState<{ side: SideKey; zone: 'library' | 'graveyard' } | null>(null);
   const [lifeSel, setLifeSel] = useState<SideKey | null>(null);
@@ -191,8 +194,11 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
     const update = () => {
       const w = el.clientWidth;
       const h = el.clientHeight;
-      const scale = Math.min(w / BOARD_W, h / BOARD_H);
-      setFit({ scale, left: (w - BOARD_W * scale) / 2, top: (h - BOARD_H * scale) / 2 });
+      // Pantalla pequeña (móvil): la mesa normal quedaría diminuta
+      const compactNow = Math.min(w / BOARD_W, h / BOARD_H) < 0.55;
+      const boardH = makeLayout(compactNow).boardH;
+      const scale = Math.min(w / BOARD_W, h / boardH);
+      setFit({ scale, left: (w - BOARD_W * scale) / 2, top: (h - boardH * scale) / 2, compact: compactNow });
       setPortrait(h > w * 1.1);
     };
     update();
@@ -257,7 +263,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
     sendAs(side, { t: 'life', value: v });
   };
   const addToken = () => {
-    const r = zoneRect('me', 'play');
+    const r = stdZoneRect('me', 'play');
     const n = state.tokens.length % 8;
     send({ t: 'tokenAdd', x: r.x + r.w / 2 - TOKEN_SIZE / 2 + n * 12, y: r.y + 20 + n * 6 });
   };
@@ -330,8 +336,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
     const top = d.y - d.grabY;
 
     if (src.kind === 'token') {
-      const x = clamp(left, 0, BOARD_W - TOKEN_SIZE);
-      const y = clamp(top, 0, BOARD_H - TOKEN_SIZE);
+      const { x, y } = L.fromView(clamp(left, 0, BOARD_W - TOKEN_SIZE), clamp(top, 0, L.boardH - TOKEN_SIZE));
       patchState((s) => ({ ...s, tokens: s.tokens.map((t) => (t.id === src.id ? { ...t, x, y } : t)) }));
       send({ t: 'tokenMove', id: src.id, x, y });
       return;
@@ -352,15 +357,9 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
     const ref = src.kind === 'library' ? { from: 'library', fromSide: seatOf(src.side) } : { id: src.id };
 
     if (to === 'play') {
-      const r = zoneRect(toSide, 'play');
       const fromPlay = src.kind === 'play';
-      let x = clamp((fromPlay ? left : d.x - CARD_W / 2) - r.x, 0, PLAY_W - CARD_W);
-      let y = clamp((fromPlay ? top : d.y - CARD_H / 2) - r.y, 0, PLAY_H - CARD_H);
       // Las posiciones se guardan vistas por el dueño de la zona
-      if (toSide === 'opp') {
-        x = PLAY_W - CARD_W - x;
-        y = PLAY_H - CARD_H - y;
-      }
+      const { x, y } = L.playLocal(toSide, fromPlay ? left : d.x - L.cardW / 2, fromPlay ? top : d.y - L.cardH / 2);
       if (src.kind === 'play' && src.side === toSide) {
         // Reordenar dentro de la misma zona: se ve al instante
         patchState((s) => {
@@ -647,7 +646,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
 
   const playCards = (side: SideKey) =>
     (side === 'me' ? state.me : state.opp).play.map((c) => {
-      const pos = playCardPos(side, c.x, c.y);
+      const pos = L.playCardPos(side, c.x, c.y);
       const selected = canControl(side) && c.id === selectedId;
       // La carta que acabas de soltar no se desliza: ya está donde la dejaste
       const instant = Date.now() - (justDropped.current.get(c.id) || 0) < 500;
@@ -663,8 +662,8 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
             position: 'absolute',
             left: pos.x,
             top: pos.y,
-            width: CARD_W,
-            height: CARD_H,
+            width: L.cardW,
+            height: L.cardH,
             zIndex: 20 + (c.order % 100000),
             cursor: 'grab',
             opacity: isDragged('play', c.id) ? 0.25 : 1,
@@ -710,7 +709,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
                   className="btn-secondary"
                   onPointerDown={(e) => e.stopPropagation()}
                   onClick={() => {
-                    const r2 = zoneRect('me', 'play');
+                    const r2 = stdZoneRect('me', 'play');
                     send({ t: 'move', id: selectedHand.id, to: 'play', x: (r2.w - CARD_W) / 2, y: (r2.h - CARD_H) / 2, faceUp: false });
                     setSelectedHandId(null);
                   }}
@@ -799,7 +798,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
                 className="btn-secondary"
                 onPointerDown={(e) => e.stopPropagation()}
                 onClick={() => {
-                  const r2 = zoneRect('opp', 'play');
+                  const r2 = stdZoneRect('opp', 'play');
                   sendAs('opp', { t: 'move', id: selectedOppHand.id, to: 'play', x: (r2.w - CARD_W) / 2, y: (r2.h - CARD_H) / 2, faceUp: false });
                   setSelectedHandId(null);
                 }}
@@ -885,7 +884,8 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
     const info = side === 'me' ? myInfo : oppInfo;
     const size = 190;
     const cx = side === 'me' ? SIDE_W / 2 : BOARD_W - SIDE_W / 2;
-    const cy = side === 'me' ? zoneRect('me', 'play').y + PLAY_H / 2 : zoneRect('opp', 'play').y + PLAY_H / 2;
+    const pr = zoneRect(side, 'play');
+    const cy = pr.y + pr.h / 2;
     return (
       <div
         key={`life-${side}`}
@@ -956,8 +956,8 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
           ...cardFrame,
           left,
           top,
-          width: small ? SMALL_W : CARD_W,
-          height: small ? SMALL_H : CARD_H,
+          width: small ? SMALL_W : L.cardW,
+          height: small ? SMALL_H : L.cardH,
           zIndex: 500000,
           pointerEvents: 'none',
           transform: `rotate(${rotation + 3}deg) scale(1.07)`,
@@ -971,13 +971,14 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
 
   const tokens = state.tokens.map((t) => {
     const dragged = drag && drag.moved && drag.src.kind === 'token' && drag.src.id === t.id;
-    const x = dragged ? clamp(drag.x - drag.grabX, 0, BOARD_W - TOKEN_SIZE) : t.x;
-    const y = dragged ? clamp(drag.y - drag.grabY, 0, BOARD_H - TOKEN_SIZE) : t.y;
+    const view = L.toView(t.x, t.y);
+    const x = dragged ? clamp(drag.x - drag.grabX, 0, BOARD_W - TOKEN_SIZE) : view.x;
+    const y = dragged ? clamp(drag.y - drag.grabY, 0, L.boardH - TOKEN_SIZE) : view.y;
     return (
       <div
         key={t.id}
         title="Token · arrastrar para mover · doble clic para quitar"
-        onPointerDown={(e) => startDrag(e, { kind: 'token', id: t.id }, t.x, t.y)}
+        onPointerDown={(e) => startDrag(e, { kind: 'token', id: t.id }, view.x, view.y)}
         onDoubleClick={() => send({ t: 'tokenDelete', id: t.id })}
         onContextMenu={(e) => {
           e.preventDefault();
@@ -1342,7 +1343,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
   );
 
   // Barra de acciones a tamaño normal para móvil (fuera de la mesa escalada)
-  const barBtn: React.CSSProperties = { padding: '9px 12px', fontSize: 15 };
+  const barBtn: React.CSSProperties = { padding: '6px 10px', fontSize: 14 };
   const sideName = (side: SideKey) => (solo ? state.players[seatOf(side)]?.name : side === 'me' ? 'tu' : oppInfo?.name);
   let barTitle = '';
   let barContent: React.ReactNode = null;
@@ -1490,7 +1491,14 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
       {/* Mesa escalada: misma disposición para los dos jugadores */}
       <div
         ref={areaRef}
-        style={{ position: 'absolute', inset: 0 }}
+        style={{
+          position: 'absolute',
+          // Sin meterse bajo la muesca ni la barra de inicio del móvil
+          top: 'env(safe-area-inset-top, 0px)',
+          right: 'env(safe-area-inset-right, 0px)',
+          bottom: 'env(safe-area-inset-bottom, 0px)',
+          left: 'env(safe-area-inset-left, 0px)',
+        }}
         onPointerDown={clearSelections}
       >
         <div
@@ -1500,7 +1508,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
             left: fit.left,
             top: fit.top,
             width: BOARD_W,
-            height: BOARD_H,
+            height: L.boardH,
             transform: `scale(${fit.scale})`,
             transformOrigin: '0 0',
             touchAction: 'none', // el dedo arrastra cartas en vez de mover o ampliar la página
@@ -1526,12 +1534,12 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
           {tokens}
           {ghost()}
           {solo && cardsOf('me') + cardsOf('opp') === 0 && (
-            <div style={{ position: 'absolute', left: SIDE_W, top: BOARD_H / 2 - 20, width: PLAY_W, textAlign: 'center', color: 'rgba(255,255,255,0.4)', fontSize: 22, pointerEvents: 'none' }}>
+            <div style={{ position: 'absolute', left: SIDE_W, top: L.boardH / 2 - 20, width: PLAY_W, textAlign: 'center', color: 'rgba(255,255,255,0.4)', fontSize: 22, pointerEvents: 'none' }}>
               Elige un mazo para cada jugador en el panel y pulsa el botón de al lado para ponerlo barajado
             </div>
           )}
           {!solo && !myCardsInGame && (
-            <div style={{ position: 'absolute', left: SIDE_W, top: zoneRect('me', 'play').y + 130, width: PLAY_W, textAlign: 'center', color: 'rgba(255,255,255,0.4)', fontSize: 22, pointerEvents: 'none' }}>
+            <div style={{ position: 'absolute', left: SIDE_W, top: zoneRect('me', 'play').y + zoneRect('me', 'play').h * 0.4, width: PLAY_W, textAlign: 'center', color: 'rgba(255,255,255,0.4)', fontSize: 22, pointerEvents: 'none' }}>
               {myInfo?.deckId ? 'Pulsa "Poner mi mazo barajado" para empezar' : 'Elige tu mazo en el panel de la sala y pulsa "Poner mi mazo barajado"'}
             </div>
           )}
@@ -1576,7 +1584,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
             style={{
               // En la línea central, entre las dos zonas de juego, para no tapar manos ni montones
               position: 'absolute',
-              top: fit.top + (BOARD_H / 2) * fit.scale,
+              top: fit.top + (L.boardH / 2) * fit.scale,
               left: '50%',
               transform: 'translate(-50%, -50%)',
               display: 'flex',

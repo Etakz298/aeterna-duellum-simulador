@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { Tabletop } from './components/Tabletop';
 import type { BoardCard, LifeCounter, CardTemplate, CardBack } from './types';
@@ -17,6 +17,7 @@ import { loadStoredSession } from './online/useOnlineGame';
 import { fetchLibrary, getDefaultServerUrl } from './online/server';
 
 // Un enlace de invitación (?sala=CODIGO) o una partida a medias abren el modo online
+const SYNC_KEY = 'server_library_synced';
 const initialSala = new URLSearchParams(window.location.search).get('sala')?.toUpperCase() || undefined;
 
 interface ModalState {
@@ -89,6 +90,7 @@ export default function App() {
     initialSala || loadStoredSession() ? 'online' : 'solo'
   );
   const [libraryLoaded, setLibraryLoaded] = useState(false);
+  const syncingRef = useRef(false);
 
   // Check if running inside Electron wrapper
   const isElectron = typeof window !== 'undefined' && !!window.electronAPI;
@@ -274,9 +276,11 @@ export default function App() {
   // Traer los mazos publicados en el servidor del 1 vs 1 a la biblioteca de este ordenador
   const [importProgress, setImportProgress] = useState<{ done: number; total: number } | null>(null);
 
-  const handleImportServerDecks = async () => {
+  // silent: sincronización automática al abrir la app (sin preguntar ni avisar)
+  const handleImportServerDecks = async ({ silent = false }: { silent?: boolean } = {}) => {
     const serverUrl = getDefaultServerUrl();
     if (!serverUrl) {
+      if (silent) return;
       showAlert('Sin servidor', 'Entra una vez en "Jugar Online (1 vs 1)" y conéctate al servidor; después podrás traer sus mazos desde aquí.');
       return;
     }
@@ -284,11 +288,15 @@ export default function App() {
     try {
       lib = await fetchLibrary(serverUrl);
     } catch {
+      if (silent) return;
       showAlert('Sin conexión', 'No se ha podido leer el servidor del 1 vs 1. Comprueba la conexión e inténtalo de nuevo.');
       return;
     }
+    const syncMark = `${serverUrl}|${lib.updatedAt}`;
+    if (silent && localStorage.getItem(SYNC_KEY) === syncMark) return; // ya está al día
     const serverDecks = Object.keys(lib.deckNames).filter((d) => lib.templates.some((t) => t.deckId === d));
     if (serverDecks.length === 0) {
+      if (silent) return;
       showAlert('Sin mazos', 'Todavía no hay mazos publicados en el servidor del 1 vs 1.');
       return;
     }
@@ -380,16 +388,17 @@ export default function App() {
         for (const d of serverDecks) names[target[d]] = lib.deckNames[d];
         saveDeckNamesState(names);
 
-        showAlert('Mazos traídos', `Ya tienes en este ordenador: ${serverDecks.map((d) => lib.deckNames[d]).join(', ')}.`);
+        localStorage.setItem(SYNC_KEY, syncMark);
+        if (!silent) showAlert('Mazos traídos', `Ya tienes en este ordenador: ${serverDecks.map((d) => lib.deckNames[d]).join(', ')}.`);
       } catch (err) {
         console.error(err);
-        showAlert('No se han podido traer', 'Ha fallado la descarga de alguna carta. No se ha cambiado nada; inténtalo de nuevo.');
+        if (!silent) showAlert('No se han podido traer', 'Ha fallado la descarga de alguna carta. No se ha cambiado nada; inténtalo de nuevo.');
       } finally {
         setImportProgress(null);
       }
     };
 
-    if (replaced.length > 0) {
+    if (replaced.length > 0 && !silent) {
       showConfirm(
         'Traer mazos del 1 vs 1',
         `Se cambiarán las cartas de estos mazos de este ordenador por las del servidor: ${replaced.join(', ')}. ¿Continuar?`,
@@ -399,6 +408,17 @@ export default function App() {
       run();
     }
   };
+
+  // Los mazos publicados para el 1 vs 1 se copian solos a este dispositivo al abrir
+  // la app y al volver al modo un jugador (solo si han cambiado en el servidor)
+  useEffect(() => {
+    if (!libraryLoaded || mode === 'online' || syncingRef.current) return;
+    syncingRef.current = true;
+    handleImportServerDecks({ silent: true }).finally(() => {
+      syncingRef.current = false;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [libraryLoaded, mode]);
 
   // Upload Custom Back per Deck
   const handleUploadBack = async (deckId: string, type: 'backA' | 'backB', blob: Blob) => {
@@ -857,7 +877,7 @@ export default function App() {
         showAlert={showAlert}
         onOpenOnline={() => setMode('online')}
         onOpenSolo={() => setMode('solo')}
-        onImportServerDecks={handleImportServerDecks}
+        onImportServerDecks={() => handleImportServerDecks()}
         importProgress={importProgress}
       />
 
