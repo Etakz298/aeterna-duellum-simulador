@@ -1512,7 +1512,12 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
           bottom: 'env(safe-area-inset-bottom, 0px)',
           left: 'env(safe-area-inset-left, 0px)',
         }}
-        onPointerDown={clearSelections}
+        onPointerDown={() => {
+          clearSelections();
+          // Tocar el tablero vacío también quita la carta ampliada
+          window.clearTimeout(tapTimer.current);
+          setTapPreview(null);
+        }}
       >
         <div
           ref={boardRef}
