@@ -93,6 +93,7 @@ interface DragState {
   moved: boolean;
   shift: boolean;
   longPress?: boolean;
+  preview?: string; // carta que se ve (para ampliarla al tocar en el móvil)
 }
 
 
@@ -174,6 +175,13 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
       : { font: 14, pad: '7px 10px', icon: 14, pile: 40, life: 36 };
   const pileBtn: React.CSSProperties = { padding: 6, width: ui.pile, height: ui.pile, justifyContent: 'center' };
   const smallBtn: React.CSSProperties = isTouch ? { padding: '6px 12px', fontSize: 16 } : { padding: '3px 10px', fontSize: 13 };
+  const [tapPreview, setTapPreview] = useState<string | null>(null);
+  const tapTimer = useRef<number | undefined>(undefined);
+  const showTapPreview = (templateId: string) => {
+    window.clearTimeout(tapTimer.current);
+    setTapPreview(templateId);
+    tapTimer.current = window.setTimeout(() => setTapPreview(null), 4000);
+  };
   const clearSelections = () => {
     setSelectedId(null);
     setSelectedHandId(null);
@@ -297,17 +305,21 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
     e.preventDefault();
     e.stopPropagation();
     const p = toBoard(e.clientX, e.clientY);
-    const d: DragState = { src, startX: e.clientX, startY: e.clientY, grabX: p.x - itemX, grabY: p.y - itemY, x: p.x, y: p.y, moved: false, shift: e.shiftKey };
+    const d: DragState = { src, startX: e.clientX, startY: e.clientY, grabX: p.x - itemX, grabY: p.y - itemY, x: p.x, y: p.y, moved: false, shift: e.shiftKey, preview: previewTemplateId };
     dragRef.current = d;
     setDrag(d);
     // Mantener pulsado con el dedo: vista ampliada de la carta
     window.clearTimeout(pressTimer.current);
-    if (e.pointerType === 'touch' && previewTemplateId) {
+    if (e.pointerType === 'touch' && (previewTemplateId || (compact && src.kind === 'library'))) {
       pressTimer.current = window.setTimeout(() => {
         const cur = dragRef.current;
         if (cur && !cur.moved) {
           dragRef.current = { ...cur, longPress: true };
-          setPressPreview(previewTemplateId);
+          // En móvil, mantener pulsado el mazo muestra barajar y mirar
+          if (src.kind === 'library') {
+            clearSelections();
+            setPileSel({ side: src.side, zone: 'library' });
+          } else setPressPreview(previewTemplateId!);
         }
       }, 450);
     }
@@ -316,17 +328,18 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
   const dropRef = useRef<(d: DragState) => void>(() => {});
   dropRef.current = (d: DragState) => {
     const { src } = d;
-    if (d.longPress || src.kind === 'view') return;
+    if (d.longPress) return;
+    // Móvil: al tocar una carta se ve en grande unos segundos en el borde derecho
+    if (!d.moved && compact && d.preview) showTapPreview(d.preview);
+    if (src.kind === 'view') return;
     if (!d.moved) {
       // Clic (o toque) sin arrastrar
       const wasHand = selectedHandId;
       const wasToken = selectedTokenId;
       clearSelections();
       // En móvil tocar un montón muestra sus acciones en vez de robar directamente
-      if (src.kind === 'library') {
-        if (compact) setPileSel({ side: src.side, zone: 'library' });
-        else draw(src.side);
-      } else if (src.kind === 'graveyard' && compact && canControl(src.side)) setPileSel({ side: src.side, zone: 'graveyard' });
+      if (src.kind === 'library') draw(src.side);
+      else if (src.kind === 'graveyard' && compact && canControl(src.side)) setPileSel({ side: src.side, zone: 'graveyard' });
       else if (src.kind === 'play' && canControl(src.side)) setSelectedId(src.id);
       else if (src.kind === 'hand') setSelectedHandId(wasHand === src.id ? null : src.id);
       else if (src.kind === 'token') setSelectedTokenId(wasToken === src.id ? null : src.id);
@@ -1168,7 +1181,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
       </button>
       <div style={{ fontSize: isTouch ? 15 : 12, color: 'var(--text-muted)', lineHeight: 1.45 }}>
         {compact
-          ? 'Mueves las cartas de los dos jugadores. Toca una carta, una biblioteca, un cementerio o una vida para ver sus acciones; mantén pulsada una carta para ampliarla.'
+          ? 'Mueves las cartas de los dos jugadores. Toca una biblioteca para robar (mantenla pulsada para barajar o mirar). Toca una carta para verla en grande y ver sus acciones; toca un cementerio o una vida para ver las suyas.'
           : isTouch
           ? 'Mueves las cartas de los dos jugadores. Toca una carta para ver sus acciones y mantén pulsado para ampliarla.'
           : 'Mueves las cartas de los dos jugadores. R: robar (abajo) · F: voltear · Q/E: girar · H: a la mano · G: al cementerio'}
@@ -1295,7 +1308,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
       </div>
       <div style={{ fontSize: isTouch ? 15 : 12, color: 'var(--text-muted)', lineHeight: 1.45 }}>
         {compact
-          ? 'Arrastra las cartas con el dedo. Toca una carta, tu biblioteca, tu cementerio o tu vida para ver sus acciones; mantén pulsada una carta para ampliarla.'
+          ? 'Arrastra las cartas con el dedo. Toca tu biblioteca para robar (mantenla pulsada para barajar o mirar). Toca una carta para verla en grande y ver sus acciones; toca tu cementerio o tu vida para ver las suyas.'
           : isTouch
           ? 'Arrastra las cartas con el dedo. Toca una carta para ver sus acciones y mantén pulsado para ampliarla.'
           : 'Arrastra las cartas entre tus franjas. R: robar · F: voltear · Q/E: girar · H: a la mano · G: al cementerio'}
@@ -1604,6 +1617,32 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
               <X size={16} />
             </button>
           </div>
+        )}
+
+        {/* Móvil: carta tocada, en grande en el borde derecho durante unos segundos */}
+        {compact && !previewTemplate && tapPreview && templateMap.get(tapPreview)?.imageUrl && (
+          <img
+            key={tapPreview}
+            className="ol-tap-preview"
+            src={templateMap.get(tapPreview)!.imageUrl}
+            alt={templateMap.get(tapPreview)!.name}
+            onPointerDown={(e) => {
+              e.stopPropagation();
+              setTapPreview(null);
+            }}
+            style={{
+              position: 'absolute',
+              top: 8,
+              right: 8,
+              height: 'calc(100% - 16px)',
+              maxWidth: '40%',
+              aspectRatio: `${CARD_W} / ${CARD_H}`,
+              objectFit: 'contain',
+              borderRadius: 12,
+              boxShadow: '0 20px 50px rgba(0,0,0,0.8)',
+              zIndex: 600000,
+            }}
+          />
         )}
 
         {/* Vista ampliada de la carta bajo el ratón */}
