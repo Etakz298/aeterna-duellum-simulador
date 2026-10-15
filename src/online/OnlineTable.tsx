@@ -9,6 +9,9 @@ import {
   History,
   Hand,
   Layers,
+  Maximize,
+  Menu,
+  Minimize,
   LogOut,
   MessageSquare,
   RefreshCw,
@@ -44,6 +47,7 @@ import {
 } from './layout';
 import { inviteLink } from './server';
 import { MatchHistory } from './MatchHistory';
+import { IOS_FULLSCREEN_HINT, fullscreenSupported, toggleFullscreen, useIsFullscreen } from '../fullscreen';
 import type { ConnectionStatus } from './useOnlineGame';
 
 interface OnlineTableProps {
@@ -148,14 +152,36 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
   const [selectedHandId, setSelectedHandId] = useState<string | null>(null);
   const [selectedTokenId, setSelectedTokenId] = useState<string | null>(null);
   const [portrait, setPortrait] = useState(false);
-  const ui = isTouch ? { font: 19, pad: '10px 12px', icon: 20, pile: 56, life: 52 } : { font: 14, pad: '7px 10px', icon: 14, pile: 40, life: 36 };
-  const pileBtn: React.CSSProperties = { padding: 6, width: ui.pile, height: ui.pile, justifyContent: 'center' };
-  const smallBtn: React.CSSProperties = isTouch ? { padding: '6px 12px', fontSize: 16 } : { padding: '3px 10px', fontSize: 13 };
 
   const areaRef = useRef<HTMLDivElement>(null);
   const boardRef = useRef<HTMLDivElement>(null);
   const logEndRef = useRef<HTMLDivElement>(null);
   const [fit, setFit] = useState({ scale: 1, left: 0, top: 0 });
+  // Pantalla pequeña (móvil): la mesa se ve muy reducida, así que el panel y las
+  // acciones salen a tamaño normal fuera de la mesa
+  const compact = fit.scale < 0.55;
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [pileSel, setPileSel] = useState<{ side: SideKey; zone: 'library' | 'graveyard' } | null>(null);
+  const [lifeSel, setLifeSel] = useState<SideKey | null>(null);
+  const fullscreen = useIsFullscreen();
+  const ui = compact
+    ? { font: 15, pad: '8px 10px', icon: 16, pile: 40, life: 36 }
+    : isTouch
+      ? { font: 19, pad: '10px 12px', icon: 20, pile: 56, life: 52 }
+      : { font: 14, pad: '7px 10px', icon: 14, pile: 40, life: 36 };
+  const pileBtn: React.CSSProperties = { padding: 6, width: ui.pile, height: ui.pile, justifyContent: 'center' };
+  const smallBtn: React.CSSProperties = isTouch ? { padding: '6px 12px', fontSize: 16 } : { padding: '3px 10px', fontSize: 13 };
+  const clearSelections = () => {
+    setSelectedId(null);
+    setSelectedHandId(null);
+    setSelectedTokenId(null);
+    setPileSel(null);
+    setLifeSel(null);
+  };
+  const onFullscreen = async () => {
+    if (!fullscreenSupported()) return toast(IOS_FULLSCREEN_HINT);
+    if (!(await toggleFullscreen())) toast('El navegador no ha permitido la pantalla completa');
+  };
 
   // ---------- Escalado: la mesa lógica 1920x1080 ocupa todo lo posible ----------
 
@@ -287,10 +313,17 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
     if (d.longPress || src.kind === 'view') return;
     if (!d.moved) {
       // Clic (o toque) sin arrastrar
-      if (src.kind === 'library') draw(src.side);
+      const wasHand = selectedHandId;
+      const wasToken = selectedTokenId;
+      clearSelections();
+      // En móvil tocar un montón muestra sus acciones en vez de robar directamente
+      if (src.kind === 'library') {
+        if (compact) setPileSel({ side: src.side, zone: 'library' });
+        else draw(src.side);
+      } else if (src.kind === 'graveyard' && compact && canControl(src.side)) setPileSel({ side: src.side, zone: 'graveyard' });
       else if (src.kind === 'play' && canControl(src.side)) setSelectedId(src.id);
-      else if (src.kind === 'hand') setSelectedHandId((h) => (h === src.id ? null : src.id));
-      else if (src.kind === 'token') setSelectedTokenId((t) => (t === src.id ? null : src.id));
+      else if (src.kind === 'hand') setSelectedHandId(wasHand === src.id ? null : src.id);
+      else if (src.kind === 'token') setSelectedTokenId(wasToken === src.id ? null : src.id);
       return;
     }
     const left = d.x - d.grabX;
@@ -500,7 +533,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
         <div style={{ ...pill, left: r.x + r.w / 2, top: side === 'me' ? r.y + SMALL_H + 14 : r.y + 8 }}>
           Biblioteca · {lib.count}
         </div>
-        {canControl(side) && (
+        {canControl(side) && !compact && (
           <div
             style={{
               position: 'absolute',
@@ -567,10 +600,10 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
             </div>
           );
         })}
-        <div style={{ ...pill, left: canControl(side) && list.length > 0 ? r.x + (isTouch ? 70 : 82) : r.x + r.w / 2, top: side === 'me' ? r.y + 150 : r.y + 18 }}>
+        <div style={{ ...pill, left: canControl(side) && list.length > 0 && !compact ? r.x + (isTouch ? 70 : 82) : r.x + r.w / 2, top: side === 'me' ? r.y + 150 : r.y + 18 }}>
           Cementerio · {list.length}
         </div>
-        {canControl(side) && list.length > 0 && (
+        {canControl(side) && list.length > 0 && !compact && (
           <button
             className="btn-secondary"
             style={{ ...pileBtn, position: 'absolute', left: r.x + r.w - ui.pile - 6, top: side === 'me' ? r.y + 196 - ui.pile - 6 : r.y + 6, zIndex: 12 }}
@@ -666,7 +699,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
             <span style={{ color: handRevealed ? 'var(--color-accent)' : 'var(--text-muted)', fontSize: isTouch ? 15 : 13, flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
               {selectedHand || solo ? '' : handRevealed ? 'Tu rival está viendo tu mano' : 'Solo tú ves estas cartas'}
             </span>
-            {selectedHand && (
+            {selectedHand && !compact && (
               <>
                 {!solo && (
                   <button className="btn-secondary" onPointerDown={(e) => e.stopPropagation()} onClick={() => send({ t: 'reveal', id: selectedHand.id })} title="Enseñar esta carta al rival sin jugarla" style={smallBtn}>
@@ -688,7 +721,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
                 </button>
               </>
             )}
-            {!solo && (
+            {!solo && !compact && (
               <button
                 className={handRevealed ? 'btn-primary' : 'btn-secondary'}
                 onPointerDown={(e) => e.stopPropagation()}
@@ -761,7 +794,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
             <strong>
               Mano de {oppInfo?.name} ({state.oppHand.length})
             </strong>
-            {selectedOppHand && (
+            {selectedOppHand && !compact && (
               <button
                 className="btn-secondary"
                 onPointerDown={(e) => e.stopPropagation()}
@@ -857,7 +890,24 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
       <div
         key={`life-${side}`}
         className="life-counter-token"
-        style={{ left: cx - size / 2, top: cy - size / 2, width: size, height: size, cursor: 'default', zIndex: 50 }}
+        onPointerDown={compact && mine ? (e) => e.stopPropagation() : undefined}
+        onClick={
+          compact && mine
+            ? () => {
+                clearSelections();
+                setLifeSel(side);
+              }
+            : undefined
+        }
+        style={{
+          left: cx - size / 2,
+          top: cy - size / 2,
+          width: size,
+          height: size,
+          cursor: compact && mine ? 'pointer' : 'default',
+          zIndex: 50,
+          boxShadow: lifeSel === side ? '0 0 0 4px var(--color-accent), 0 10px 25px rgba(0,0,0,0.5)' : undefined,
+        }}
       >
         <div className="life-counter-label" style={{ fontSize: 15, maxWidth: 150 }}>
           {solo ? deckNameOf(side) || info?.name : info ? info.name : 'Esperando…'}
@@ -866,7 +916,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
           <div style={{ fontSize: 12, color: 'var(--color-danger)' }}>{info.left ? 'ha salido' : 'desconectado'}</div>
         )}
         <div className="life-counter-display">
-          {mine && (
+          {mine && !compact && (
             <button className="life-counter-btn" style={{ width: ui.life, height: ui.life, fontSize: isTouch ? 26 : undefined }} onClick={() => setLife(side, value - 1)} disabled={value <= LIFE_MIN} title="Restar vida">
               −
             </button>
@@ -874,7 +924,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
           <span key={value} className="life-counter-val ol-pulse" style={{ fontSize: 54 }}>
             {value}
           </span>
-          {mine && (
+          {mine && !compact && (
             <button className="life-counter-btn" style={{ width: ui.life, height: ui.life, fontSize: isTouch ? 26 : undefined }} onClick={() => setLife(side, value + 1)} disabled={value >= LIFE_MAX} title="Sumar vida">
               +
             </button>
@@ -951,7 +1001,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
           outlineOffset: 3,
         }}
       >
-        {selectedTokenId === t.id && !dragged && (
+        {selectedTokenId === t.id && !dragged && !compact && (
           <button
             className="btn-danger"
             title="Quitar token"
@@ -1002,6 +1052,14 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
       [...state.me.play, ...state.opp.play].some((c) => c.id === hoverTemplate.cardId && c.isFaceUp));
   const previewTemplate = pressPreview ? templateMap.get(pressPreview) : hoverStillThere ? templateMap.get(hoverTemplate!.templateId) : undefined;
 
+  const panelBox: React.CSSProperties = compact
+    ? { position: 'relative', width: 'min(300px, 88vw)', padding: 14, display: 'flex', flexDirection: 'column', gap: 9, fontSize: 15 }
+    : { position: 'absolute', left: 14, top: 14, width: SIDE_W - 28, padding: 16, display: 'flex', flexDirection: 'column', gap: 10, zIndex: 60, fontSize: isTouch ? 18 : 14 };
+  const fullscreenBtn = (
+    <button className="btn-secondary" onClick={onFullscreen} title={fullscreen ? 'Salir de pantalla completa' : 'Pantalla completa'} style={{ ...btn, padding: '6px 9px' }}>
+      {fullscreen ? <Minimize size={ui.icon} /> : <Maximize size={ui.icon} />}
+    </button>
+  );
   const cardsOf = (side: SideKey) => {
     const sd = side === 'me' ? state.me : state.opp;
     return sd.library.count + sd.graveyard.length + sd.play.length + (side === 'me' ? state.hand.length : state.oppHand.length);
@@ -1044,10 +1102,11 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
     <div
       className="glass-panel"
       onPointerDown={(e) => e.stopPropagation()}
-      style={{ position: 'absolute', left: 14, top: 14, width: SIDE_W - 28, padding: 16, display: 'flex', flexDirection: 'column', gap: 10, zIndex: 60, fontSize: isTouch ? 18 : 14 }}
+      style={panelBox}
     >
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div style={{ fontSize: 20, fontWeight: 700, color: '#fff' }}>Un jugador</div>
+        {fullscreenBtn}
       </div>
       <div style={{ display: 'flex', gap: 6 }}>
         <button className="btn-secondary" onClick={onLeave} title="Gestionar mazos, cartas y dorsos" style={{ ...btn, flex: 1 }}>
@@ -1070,6 +1129,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
               {deckSelect(side, 'Elige mazo…')}
               <button
                 className="btn-primary"
+                data-keep
                 disabled={!has}
                 onClick={() => spawnDeck(side)}
                 title="Poner el mazo barajado en su biblioteca"
@@ -1106,7 +1166,9 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
         Reiniciar
       </button>
       <div style={{ fontSize: isTouch ? 15 : 12, color: 'var(--text-muted)', lineHeight: 1.45 }}>
-        {isTouch
+        {compact
+          ? 'Mueves las cartas de los dos jugadores. Toca una carta, una biblioteca, un cementerio o una vida para ver sus acciones; mantén pulsada una carta para ampliarla.'
+          : isTouch
           ? 'Mueves las cartas de los dos jugadores. Toca una carta para ver sus acciones y mantén pulsado para ampliarla.'
           : 'Mueves las cartas de los dos jugadores. R: robar (abajo) · F: voltear · Q/E: girar · H: a la mano · G: al cementerio'}
       </div>
@@ -1117,17 +1179,29 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
     <div
       className="glass-panel"
       onPointerDown={(e) => e.stopPropagation()}
-      style={{ position: 'absolute', left: 14, top: 14, width: SIDE_W - 28, padding: 16, display: 'flex', flexDirection: 'column', gap: 10, zIndex: 60, fontSize: isTouch ? 18 : 14 }}
+      style={panelBox}
     >
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div>
           <div style={{ fontSize: 12, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Sala online</div>
           <div style={{ fontSize: 24, fontWeight: 700, letterSpacing: 3, color: '#fff' }}>{state.code}</div>
         </div>
-        <button className="btn-secondary" onClick={copyInvite} title="Copiar enlace de invitación" style={btn}>
-          <Copy size={14} /> Invitar
-        </button>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <button className="btn-secondary" onClick={copyInvite} title="Copiar enlace de invitación" style={btn}>
+            <Copy size={14} /> Invitar
+          </button>
+          {fullscreenBtn}
+        </div>
       </div>
+      {compact && (
+        <button
+          className={handRevealed ? 'btn-primary' : 'btn-secondary'}
+          onClick={() => send({ t: 'showHand', value: !handRevealed })}
+          style={btn}
+        >
+          {handRevealed ? <EyeOff size={ui.icon} /> : <Eye size={ui.icon} />} {handRevealed ? 'Ocultar mi mano' : 'Enseñar mi mano al rival'}
+        </button>
+      )}
       {(['p1', 'p2'] as Seat[]).map((seat) => {
         const p = state.players[seat];
         return (
@@ -1175,7 +1249,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
             </option>
           ))}
         </select>
-        <button className="btn-secondary" onClick={onReloadLibrary} title="Recargar mazos del servidor" style={{ padding: '6px 9px' }}>
+        <button className="btn-secondary" data-keep onClick={onReloadLibrary} title="Recargar mazos del servidor" style={{ padding: '6px 9px' }}>
           <RefreshCw size={14} />
         </button>
       </div>
@@ -1219,7 +1293,9 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
         </button>
       </div>
       <div style={{ fontSize: isTouch ? 15 : 12, color: 'var(--text-muted)', lineHeight: 1.45 }}>
-        {isTouch
+        {compact
+          ? 'Arrastra las cartas con el dedo. Toca una carta, tu biblioteca, tu cementerio o tu vida para ver sus acciones; mantén pulsada una carta para ampliarla.'
+          : isTouch
           ? 'Arrastra las cartas con el dedo. Toca una carta para ver sus acciones y mantén pulsado para ampliarla.'
           : 'Arrastra las cartas entre tus franjas. R: robar · F: voltear · Q/E: girar · H: a la mano · G: al cementerio'}
       </div>
@@ -1227,7 +1303,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
   );
 
   // Acciones de la carta seleccionada (barra flotante como en un jugador)
-  const selectionBar = selectedCard && (
+  const selectionBar = selectedCard && !compact && (
     <div
       className="glass-panel"
       onPointerDown={(e) => e.stopPropagation()}
@@ -1265,8 +1341,149 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
     </div>
   );
 
+  // Barra de acciones a tamaño normal para móvil (fuera de la mesa escalada)
+  const barBtn: React.CSSProperties = { padding: '9px 12px', fontSize: 15 };
+  const sideName = (side: SideKey) => (solo ? state.players[seatOf(side)]?.name : side === 'me' ? 'tu' : oppInfo?.name);
+  let barTitle = '';
+  let barContent: React.ReactNode = null;
+  if (compact) {
+    if (selectedCard) {
+      barTitle = 'Carta';
+      barContent = (
+        <>
+          <button className="btn-secondary" onClick={flip} style={barBtn}>
+            <Eye size={16} /> Voltear
+          </button>
+          <button className="btn-secondary" onClick={() => rotate(-90)} style={barBtn} title="Girar a la izquierda">
+            <RotateCcw size={16} />
+          </button>
+          <button className="btn-secondary" onClick={() => rotate(90)} style={barBtn} title="Girar a la derecha">
+            <RotateCw size={16} />
+          </button>
+          <button className="btn-secondary" onClick={() => moveSelected('hand')} style={barBtn}>
+            <Hand size={16} /> Mano
+          </button>
+          <button className="btn-secondary" onClick={() => moveSelected('graveyard')} style={barBtn}>
+            <Archive size={16} /> Cementerio
+          </button>
+        </>
+      );
+    } else if (selectedHand || selectedOppHand) {
+      const side: SideKey = selectedHand ? 'me' : 'opp';
+      const id = (selectedHand || selectedOppHand)!.id!;
+      barTitle = 'Mano';
+      barContent = (
+        <>
+          {!solo && (
+            <button className="btn-secondary" onClick={() => send({ t: 'reveal', id })} style={barBtn}>
+              <Eye size={16} /> Enseñar
+            </button>
+          )}
+          <button
+            className="btn-secondary"
+            onClick={() => {
+              sendAs(side, { t: 'move', id, to: 'play', x: (PLAY_W - CARD_W) / 2, y: (PLAY_H - CARD_H) / 2, faceUp: true });
+              setSelectedHandId(null);
+            }}
+            style={barBtn}
+          >
+            <Layers size={16} /> Jugar
+          </button>
+          <button
+            className="btn-secondary"
+            onClick={() => {
+              sendAs(side, { t: 'move', id, to: 'play', x: (PLAY_W - CARD_W) / 2, y: (PLAY_H - CARD_H) / 2, faceUp: false });
+              setSelectedHandId(null);
+            }}
+            style={barBtn}
+          >
+            <EyeOff size={16} /> Boca abajo
+          </button>
+          <button
+            className="btn-secondary"
+            onClick={() => {
+              sendAs(side, { t: 'move', id, to: 'graveyard' });
+              setSelectedHandId(null);
+            }}
+            style={barBtn}
+          >
+            <Archive size={16} /> Cementerio
+          </button>
+        </>
+      );
+    } else if (selectedTokenId) {
+      barTitle = 'Token';
+      barContent = (
+        <button
+          className="btn-danger"
+          onClick={() => {
+            send({ t: 'tokenDelete', id: selectedTokenId });
+            setSelectedTokenId(null);
+          }}
+          style={barBtn}
+        >
+          <X size={16} /> Quitar token
+        </button>
+      );
+    } else if (pileSel?.zone === 'library') {
+      const side = pileSel.side;
+      const count = (side === 'me' ? state.me : state.opp).library.count;
+      barTitle = solo ? `Biblioteca de ${sideName(side)}` : 'Tu biblioteca';
+      barContent = (
+        <>
+          <button className="btn-primary" onClick={() => draw(side)} disabled={!count} style={barBtn}>
+            <Hand size={16} /> Robar
+          </button>
+          <button className="btn-secondary" onClick={() => sendAs(side, { t: 'shuffleLibrary' })} disabled={!count} style={barBtn}>
+            <Shuffle size={16} /> Barajar
+          </button>
+          <button
+            className="btn-secondary"
+            onClick={() => {
+              sendAs(side, { t: 'peek', zone: 'library' });
+              setPileSel(null);
+            }}
+            disabled={!count}
+            style={barBtn}
+          >
+            <Search size={16} /> Mirar
+          </button>
+        </>
+      );
+    } else if (pileSel?.zone === 'graveyard') {
+      const side = pileSel.side;
+      barTitle = solo ? `Cementerio de ${sideName(side)}` : 'Tu cementerio';
+      barContent = (
+        <button
+          className="btn-secondary"
+          onClick={() => {
+            sendAs(side, { t: 'peek', zone: 'graveyard' });
+            setPileSel(null);
+          }}
+          style={barBtn}
+        >
+          <Search size={16} /> Ver cartas
+        </button>
+      );
+    } else if (lifeSel) {
+      const value = lifeSel === 'me' ? state.life.me : state.life.opp;
+      barTitle = solo ? `Vida de ${deckNameOf(lifeSel) || sideName(lifeSel)}` : 'Tu vida';
+      barContent = (
+        <>
+          <button className="btn-secondary" onClick={() => setLife(lifeSel, value - 1)} disabled={value <= LIFE_MIN} style={{ ...barBtn, fontSize: 22, padding: '4px 18px' }}>
+            −
+          </button>
+          <span style={{ fontSize: 26, fontWeight: 700, minWidth: 36, textAlign: 'center' }}>{value}</span>
+          <button className="btn-secondary" onClick={() => setLife(lifeSel, value + 1)} disabled={value >= LIFE_MAX} style={{ ...barBtn, fontSize: 22, padding: '4px 18px' }}>
+            +
+          </button>
+        </>
+      );
+    }
+  }
+
   return (
-    <div className="tabletop-container" style={{ width: '100vw', height: '100vh', cursor: 'default', userSelect: 'none' }}>
+    <div className="tabletop-container" style={{ width: '100%', height: '100%', cursor: 'default', userSelect: 'none' }}>
       <div className="tabletop-grid" />
       <div className="tabletop-texture" />
 
@@ -1274,11 +1491,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
       <div
         ref={areaRef}
         style={{ position: 'absolute', inset: 0 }}
-        onPointerDown={() => {
-          setSelectedId(null);
-          setSelectedHandId(null);
-          setSelectedTokenId(null);
-        }}
+        onPointerDown={clearSelections}
       >
         <div
           ref={boardRef}
@@ -1298,7 +1511,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
               band(side, zone, zone === 'play' ? (side === 'me' && !solo ? 'Tu zona de juego' : `Zona de juego de ${state.players[seatOf(side)]?.name || 'tu rival'}`) : ''),
             ),
           )}
-          {roomPanel}
+          {!compact && roomPanel}
           {lifeCounter('opp')}
           {lifeCounter('me')}
           {libraryPile('opp')}
@@ -1323,6 +1536,67 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
             </div>
           )}
         </div>
+
+        {/* Móvil: menú con el panel, pantalla completa y barra de acciones a tamaño normal */}
+        {compact && (
+          <div style={{ position: 'absolute', top: 8, left: 8, display: 'flex', gap: 6, zIndex: 650000 }} onPointerDown={(e) => e.stopPropagation()}>
+            <button className="btn-secondary" onClick={() => setMenuOpen(true)} style={{ padding: 9, background: 'rgba(18,24,38,0.92)' }} title="Menú">
+              <Menu size={20} />
+            </button>
+            <button className="btn-secondary" onClick={onFullscreen} style={{ padding: 9, background: 'rgba(18,24,38,0.92)' }} title="Pantalla completa">
+              {fullscreen ? <Minimize size={20} /> : <Maximize size={20} />}
+            </button>
+          </div>
+        )}
+        {compact && menuOpen && (
+          <div
+            style={{ position: 'absolute', inset: 0, zIndex: 760000, background: 'rgba(5, 8, 16, 0.55)' }}
+            onPointerDown={(e) => {
+              e.stopPropagation();
+              setMenuOpen(false);
+            }}
+          >
+            <div
+              style={{ position: 'absolute', left: 8, top: 8, maxHeight: 'calc(100% - 16px)', overflowY: 'auto', borderRadius: 16 }}
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                // Al pulsar una acción el menú se cierra para ver la mesa (salvo al preparar los mazos)
+                const b = (e.target as HTMLElement).closest('button');
+                if (b && !b.hasAttribute('data-keep')) setMenuOpen(false);
+              }}
+            >
+              {roomPanel}
+            </div>
+          </div>
+        )}
+        {barContent && (
+          <div
+            className="glass-panel"
+            onPointerDown={(e) => e.stopPropagation()}
+            style={{
+              // En la línea central, entre las dos zonas de juego, para no tapar manos ni montones
+              position: 'absolute',
+              top: fit.top + (BOARD_H / 2) * fit.scale,
+              left: '50%',
+              transform: 'translate(-50%, -50%)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '6px 8px',
+              zIndex: 640000,
+              maxWidth: 'calc(100% - 130px)',
+              overflowX: 'auto',
+              whiteSpace: 'nowrap',
+              boxShadow: '0 10px 30px rgba(0,0,0,0.6)',
+            }}
+          >
+            <span style={{ fontSize: 13, color: 'var(--text-muted)', fontWeight: 600, padding: '0 4px' }}>{barTitle}</span>
+            {barContent}
+            <button className="btn-secondary" onClick={clearSelections} style={{ padding: 8 }} title="Cerrar">
+              <X size={16} />
+            </button>
+          </div>
+        )}
 
         {/* Vista ampliada de la carta bajo el ratón */}
         {previewTemplate?.imageUrl && (
@@ -1404,7 +1678,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
             className="glass-panel"
             style={{ position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)', zIndex: 750000, padding: '10px 18px', fontSize: '0.95rem', whiteSpace: 'nowrap' }}
           >
-            Gira la tablet en horizontal para ver la mesa más grande
+            {compact ? 'Gira el móvil en horizontal para jugar' : 'Gira la tablet en horizontal para ver la mesa más grande'}
           </div>
         )}
 
