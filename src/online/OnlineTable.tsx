@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   Archive,
+  ArrowDown,
+  ArrowUp,
   BookOpen,
   Copy,
   Eye,
@@ -1875,6 +1877,36 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
               Elige un mazo para cada jugador en el panel y pulsa el botón de al lado para ponerlo barajado
             </div>
           )}
+          {/* Quién empieza el primer turno; pulsarlo cambia al otro jugador */}
+          {!solo && state.starter && oppInfo && (() => {
+            const mine = state.starter === me;
+            const top = (zoneRect('opp', 'play').y + zoneRect('opp', 'play').h + zoneRect('me', 'play').y) / 2;
+            return (
+              <button
+                className="btn-secondary ol-starter"
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={() => send({ t: 'toggleStarter' })}
+                title="Pulsa para que empiece el otro jugador"
+                style={{
+                  position: 'absolute',
+                  left: SIDE_W + PLAY_W - 20,
+                  top,
+                  transform: 'translate(-100%, -50%)',
+                  zIndex: 400,
+                  padding: compact ? '8px 16px' : '6px 14px',
+                  fontSize: compact ? 22 : 15,
+                  background: 'rgba(18,24,38,0.92)',
+                  border: '1px solid var(--color-accent)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                }}
+              >
+                {mine ? <ArrowDown size={compact ? 24 : 16} /> : <ArrowUp size={compact ? 24 : 16} />}
+                {mine ? 'Empiezas tú' : `Empieza ${oppInfo.name}`}
+              </button>
+            );
+          })()}
           {!solo && !myCardsInGame && (
             <div style={{ position: 'absolute', left: SIDE_W, top: zoneRect('me', 'play').y + zoneRect('me', 'play').h * 0.4, width: PLAY_W, textAlign: 'center', color: 'rgba(255,255,255,0.4)', fontSize: 22, pointerEvents: 'none' }}>
               {compact ? 'Elige tu mazo en el menú para empezar' : 'Elige tu mazo en el panel de la sala para empezar'}

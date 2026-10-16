@@ -65,6 +65,7 @@ export interface OnlineState {
   you: Seat;
   rev: number;
   players: Partial<Record<Seat, OnlinePlayer>>;
+  starter?: Seat; // quién juega el primer turno
   me: OnlineSide;
   opp: OnlineSide;
   hand: OnlineHandCard[];
