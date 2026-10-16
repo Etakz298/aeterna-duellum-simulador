@@ -33,6 +33,7 @@ export interface OnlineSide {
 export interface OnlineHandCard extends CardBackInfo {
   id: string;
   templateId: string;
+  isSpecial?: boolean; // carta Especial: va en su hueco a la derecha de la mano
 }
 
 export interface OnlinePlayer {
@@ -71,7 +72,7 @@ export interface OnlineState {
   me: OnlineSide;
   opp: OnlineSide;
   hand: OnlineHandCard[];
-  oppHand: (CardBackInfo & { templateId?: string; id?: string })[]; // templateId solo si el rival enseña su mano (id solo en un jugador)
+  oppHand: (CardBackInfo & { templateId?: string; id?: string; isSpecial?: boolean })[]; // templateId solo si el rival enseña su mano (id solo en un jugador)
   life: { me: number; opp: number };
   tokens: OnlineToken[];
   log: LogEntry[];

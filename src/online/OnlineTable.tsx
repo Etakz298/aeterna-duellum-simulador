@@ -713,11 +713,15 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
     if (to === 'hand' && src.kind === 'hand' && src.side === 'opp' && toSide === 'opp') return;
     if (to === 'hand' && src.kind === 'hand' && toSide === 'me' && src.side === 'me') {
       // Reordenar la mano según dónde se suelte
-      const ids = state.hand.map((c) => c.id).filter((id) => id !== src.id);
-      const slots = handSlots(state.hand.length, zoneRect('me', 'hand'));
-      let index = slots.filter((sx) => sx + SMALL_W / 2 < d.x).length;
+      // (la Especial no se reordena: siempre está en su hueco)
+      if (state.hand.find((c) => c.id === src.id)?.isSpecial) return;
+      const normal = state.hand.filter((c) => !c.isSpecial);
+      const ids = normal.map((c) => c.id).filter((id) => id !== src.id);
+      const xs = handPositions(state.hand, zoneRect('me', 'hand'), true).xs.filter((_, i) => !state.hand[i].isSpecial);
+      let index = xs.filter((sx) => sx + SMALL_W / 2 < d.x).length;
       index = clamp(index, 0, ids.length);
       ids.splice(index, 0, src.id);
+      ids.push(...state.hand.filter((c) => c.isSpecial).map((c) => c.id));
       patchState((s) => ({ ...s, hand: ids.map((id) => s.hand.find((c) => c.id === id)!).filter(Boolean) }));
       send({ t: 'handOrder', ids });
       return;
@@ -1047,17 +1051,24 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
     });
 
   // Bandeja de la mano propia (como en un jugador, pero dentro de su franja)
+  // Hueco reservado de la carta Especial en la mano
+  const specialSlotFrame = (x: number, y: number) => (
+    <div
+      key={`special-slot-${x}`}
+      style={{ position: 'absolute', left: x - 6, top: y - 6, width: SMALL_W + 12, height: SMALL_H + 12, borderRadius: 12, border: '2px dashed rgba(250, 204, 21, 0.55)', background: 'rgba(250, 204, 21, 0.06)', pointerEvents: 'none' }}
+    />
+  );
   const myHandTray = () => {
     const r = zoneRect('me', 'hand');
-    const cardsRect = { x: r.x, y: r.y, w: r.w, h: r.h };
-    const slots = handSlots(state.hand.length, cardsRect);
+    const { xs: slots, specialX } = handPositions(state.hand, r, true);
+    const handCount = state.hand.filter((c) => !c.isSpecial).length;
     const y = r.y + 36;
     return (
       <React.Fragment key="my-hand">
         <div className="glass-panel" style={{ position: 'absolute', left: r.x, top: r.y, width: r.w, height: r.h, borderRadius: 18 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: isTouch ? '4px 10px' : '6px 14px', fontSize: isTouch ? 17 : 15 }}>
             <Hand size={16} />
-            <strong>{solo ? `Mano de ${myInfo?.name}` : 'Tu mano'} ({state.hand.length})</strong>
+            <strong>{solo ? `Mano de ${myInfo?.name}` : 'Tu mano'} ({handCount})</strong>
             <span style={{ color: handRevealed ? 'var(--color-accent)' : 'var(--text-muted)', fontSize: isTouch ? 15 : 13, flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
               {selectedHand || solo ? '' : handRevealed ? 'Tu rival está viendo tu mano' : 'Solo tú ves estas cartas'}
             </span>
@@ -1095,6 +1106,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
             )}
           </div>
         </div>
+        {specialX !== null && specialSlotFrame(specialX, y)}
         {state.hand.map((c, i) => {
           const hovered = (hoverHandId === c.id || selectedHandId === c.id) && !drag;
           return (
@@ -1148,7 +1160,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
   // En un jugador la mano de arriba se ve y se juega igual que la de abajo
   const soloOppHandTray = () => {
     const r = zoneRect('opp', 'hand');
-    const slots = handSlots(state.oppHand.length, r);
+    const { xs: slots, specialX } = handPositions(state.oppHand, r, false);
     const y = r.y + 8;
     return (
       <React.Fragment key="opp-hand">
@@ -1156,7 +1168,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
           <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: isTouch ? '4px 10px' : '6px 14px', fontSize: isTouch ? 17 : 15 }}>
             <Hand size={16} />
             <strong>
-              Mano de {oppInfo?.name} ({state.oppHand.length})
+              Mano de {oppInfo?.name} ({state.oppHand.filter((c) => !c.isSpecial).length})
             </strong>
             {selectedOppHand && !compact && (
               <button
@@ -1174,6 +1186,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
             )}
           </div>
         </div>
+        {specialX !== null && specialSlotFrame(specialX, y)}
         {state.oppHand.map((c, i) => {
           const id = c.id!;
           const hovered = (hoverHandId === id || selectedHandId === id) && !drag;
@@ -1217,16 +1230,18 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
   const oppHandTray = () => {
     if (solo) return soloOppHandTray();
     const r = zoneRect('opp', 'hand');
-    const slots = handSlots(state.oppHand.length, r);
+    const { xs: slots, specialX } = handPositions(state.oppHand, r, false);
+    const n = state.oppHand.filter((c) => !c.isSpecial).length;
     const y = r.y + 8;
     return (
       <React.Fragment key="opp-hand">
         <div className="glass-panel" style={{ position: 'absolute', left: r.x, top: r.y, width: r.w, height: r.h, borderRadius: 18 }}>
           <div style={{ position: 'absolute', bottom: 6, left: 0, right: 0, textAlign: 'center', fontSize: 14, color: 'var(--text-muted)' }}>
-            Mano de <strong style={{ color: '#fff' }}>{oppInfo?.name || 'tu rival'}</strong>: {state.oppHand.length} {state.oppHand.length === 1 ? 'carta' : 'cartas'}
+            Mano de <strong style={{ color: '#fff' }}>{oppInfo?.name || 'tu rival'}</strong>: {n} {n === 1 ? 'carta' : 'cartas'}
             {oppInfo?.handRevealed && <span style={{ color: 'var(--color-accent)' }}> · te la está enseñando</span>}
           </div>
         </div>
+        {specialX !== null && specialSlotFrame(specialX, y)}
         {state.oppHand.map((c, i) => (
           <div
             key={i}
@@ -2504,6 +2519,18 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
 };
 
 // Posiciones x de las cartas de una mano dentro de su franja (se solapan si no caben)
+// Posiciones de las cartas de una mano: la Especial va en su hueco fijo (a la derecha del dueño;
+// la mano del rival se ve girada, así que allí queda a la izquierda) y el resto se reparte en lo que queda
+const SPECIAL_SLOT = SMALL_W + 30;
+function handPositions(list: { isSpecial?: boolean }[], r: Rect, specialRight: boolean): { xs: number[]; specialX: number | null } {
+  const hasSpecial = list.some((c) => c.isSpecial);
+  const rest = hasSpecial ? { ...r, w: r.w - SPECIAL_SLOT, x: specialRight ? r.x : r.x + SPECIAL_SLOT } : r;
+  const slots = handSlots(list.filter((c) => !c.isSpecial).length, rest);
+  const specialX = hasSpecial ? (specialRight ? r.x + r.w - SPECIAL_SLOT + 12 : r.x + SPECIAL_SLOT - 12 - SMALL_W) : null;
+  let k = 0;
+  return { xs: list.map((c) => (c.isSpecial ? specialX! : slots[k++])), specialX };
+}
+
 function handSlots(n: number, r: Rect): number[] {
   if (n === 0) return [];
   const pad = 16;
