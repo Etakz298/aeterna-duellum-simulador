@@ -140,10 +140,11 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
   const [showHistory, setShowHistory] = useState(false);
   const [showLog, setShowLog] = useState(false);
   const [chatText, setChatText] = useState('');
-  const [seenLog, setSeenLog] = useState(state.log.length);
+  // Mensajes de chat ya vistos (por id: el registro tiene un límite y se recorta por el principio)
+  const [seenChat, setSeenChat] = useState(() => new Set(state.log.filter((e) => e.kind === 'chat').map((e) => e.id)));
   // Mensajes de chat del rival que aparecen en el lateral aunque el chat esté cerrado
   const [chatToasts, setChatToasts] = useState<{ id: string; text: string; leaving?: boolean }[]>([]);
-  const lastChatId = useRef<string | undefined>(state.log[state.log.length - 1]?.id);
+  const toastedChat = useRef(new Set(state.log.filter((e) => e.kind === 'chat').map((e) => e.id)));
   const [hoverTemplate, setHoverTemplate] = useState<{ cardId: string; templateId: string } | null>(null);
   const [hoverHandId, setHoverHandId] = useState<string | null>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
@@ -501,7 +502,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
 
   useEffect(() => {
     if (showLog) {
-      setSeenLog(state.log.length);
+      setSeenChat(new Set(state.log.filter((e) => e.kind === 'chat').map((e) => e.id)));
       logEndRef.current?.scrollIntoView({ block: 'end' });
     }
   }, [state.log, showLog]);
@@ -1459,11 +1460,11 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
   };
 
   useEffect(() => {
-    const log = state.log;
-    const from = lastChatId.current ? log.findIndex((e) => e.id === lastChatId.current) + 1 : 0;
-    lastChatId.current = log[log.length - 1]?.id;
+    const chats = state.log.filter((e) => e.kind === 'chat');
+    const unseen = chats.filter((e) => !toastedChat.current.has(e.id));
+    for (const e of unseen) toastedChat.current.add(e.id);
     if (solo || showLog) return;
-    const fresh = log.slice(from).filter((e) => e.kind === 'chat' && e.by && e.by !== state.you);
+    const fresh = unseen.filter((e) => e.by && e.by !== state.you);
     if (!fresh.length) return;
     playChatSound();
     setChatToasts((prev) => [...prev, ...fresh.map((e) => ({ id: e.id, text: e.text }))].slice(-3));
@@ -1480,7 +1481,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
   const handRevealed = !!myInfo?.handRevealed;
   const myCardsInGame = state.me.library.count + state.hand.length + state.me.graveyard.length + state.me.play.length > 0;
   // Solo cuentan los mensajes del rival sin leer
-  const unread = showLog ? 0 : state.log.slice(seenLog).filter((e) => e.kind === 'chat' && e.by && e.by !== state.you).length;
+  const unread = showLog ? 0 : state.log.filter((e) => e.kind === 'chat' && e.by && e.by !== state.you && !seenChat.has(e.id)).length;
   const btn: React.CSSProperties = { padding: ui.pad, fontSize: ui.font };
   // La vista ampliada solo se muestra si la carta sigue donde estaba (y boca arriba)
   const hoverStillThere =

@@ -93,6 +93,16 @@ export class Game {
     if (this.log.length > LOG_LIMIT) this.log.splice(0, this.log.length - LOG_LIMIT);
   }
 
+  // Nombre de una carta para el registro: solo si está boca arriba en juego (si no, el rival no la ve)
+  cardLabel(card, library, hidden = 'una carta boca abajo') {
+    if (card.zone === 'play' && card.isFaceUp) {
+      const t = library?.templates.find((tp) => tp.id === card.templateId);
+      if (t?.name) return `«${t.name}»`;
+      return 'una carta';
+    }
+    return hidden;
+  }
+
   bump() {
     this.rev++;
     this.lastActivity = Date.now();
@@ -198,7 +208,6 @@ export class Game {
     // En 1 vs 1 cada jugador usa un mazo distinto
     if (!this.free && this.players[other(seat)]?.deckId === deckId) throw new Error('Tu rival ya ha elegido ese mazo: elige otro');
     this.players[seat].deckId = deckId;
-    this.addLog(`${this.nameOf(seat)} ha elegido el mazo "${library.deckNames[deckId]}".`);
   }
 
   // Pone el mazo elegido en la biblioteca (sustituye las cartas propias que hubiera)
@@ -236,7 +245,7 @@ export class Game {
       }
     }
     this.shuffleLibrary(seat);
-    this.addLog(`${this.nameOf(seat)} ha puesto su mazo barajado en la biblioteca (${n} cartas).`);
+    this.addLog(`${this.nameOf(seat)} juega con el mazo "${library.deckNames[deckId] || deckId}" (${n} cartas, barajado).`);
   }
 
   act_draw(seat, msg) {
@@ -263,7 +272,7 @@ export class Game {
     if (list.length === 0) throw new Error('El cementerio está vacío');
     for (const c of list) this.place(c, seat, 'library');
     this.shuffleLibrary(seat);
-    this.addLog(`${this.nameOf(seat)} ha barajado su cementerio en la biblioteca (${list.length} cartas).`);
+    this.addLog(`${this.nameOf(seat)} ha devuelto su cementerio a la biblioteca y la ha barajado (${list.length === 1 ? 'una carta' : `${list.length} cartas`}).`);
   }
 
   // Coloca una carta en una zona del jugador `side`
@@ -298,7 +307,7 @@ export class Game {
   // Mover una carta: de cualquier zona pública (o de las propias ocultas) a una zona propia.
   // Solo se puede llevar a tus zonas; así se puede "robar" una carta del rival
   // a tu mano, zona de juego o cementerio, pero nunca sacarla de las zonas.
-  act_move(seat, msg) {
+  act_move(seat, msg, library) {
     const to = String(msg.to || '');
     if (!ZONES.includes(to)) throw new Error('Zona no válida');
 
@@ -318,6 +327,7 @@ export class Game {
 
     const fromZone = card.zone;
     const fromSide = card.side;
+    const wasFaceUp = card.isFaceUp;
 
     // Reordenar dentro de tu propia zona de juego
     if (fromZone === 'play' && to === 'play' && fromSide === seat) {
@@ -336,31 +346,43 @@ export class Game {
     }
     this.place(card, seat, to, { x: msg.x, y: msg.y, faceUp, resetRotation: fromZone !== 'play' });
 
-    // Registro
+    // Registro: dice qué carta es cuando se ve (boca arriba en juego)
     const who = this.nameOf(seat);
-    const fromText =
-      fromSide === seat
-        ? { library: 'de su biblioteca', hand: 'de su mano', play: 'de su zona de juego', graveyard: 'de su cementerio' }[fromZone]
-        : { play: `de la zona de juego de ${this.nameOf(fromSide)}`, graveyard: `del cementerio de ${this.nameOf(fromSide)}` }[fromZone];
-    let what = 'una carta';
-    if (to === 'play' && card.isFaceUp) what = 'una carta boca arriba';
-    if (to === 'play' && !card.isFaceUp) what = 'una carta boca abajo';
-    this.addLog(`${who} ha movido ${what} ${fromText} a ${ZONE_NAMES[to]}.`);
+    const rival = fromSide !== seat ? this.nameOf(fromSide) : null;
+    const before = wasFaceUp && fromZone === 'play' ? this.cardLabel({ ...card, zone: 'play', isFaceUp: true }, library) : null;
+    const name = to === 'play' ? this.cardLabel(card, library) : before || 'una carta';
+    let text;
+    if (rival) {
+      const where = fromZone === 'play' ? `de la zona de juego de ${rival}` : `del cementerio de ${rival}`;
+      text = `${who} ha cogido ${before || 'una carta'} ${where} y la ha llevado a ${ZONE_NAMES[to]}.`;
+    } else if (to === 'play') {
+      text = fromZone === 'hand' ? `${who} ha jugado ${name}.` : `${who} ha sacado ${name} ${{ library: 'de su biblioteca', graveyard: 'de su cementerio' }[fromZone]}.`;
+    } else if (to === 'hand') {
+      text = { library: `${who} ha cogido la carta de arriba de su biblioteca a su mano.`, play: `${who} ha devuelto ${name} a su mano.`, graveyard: `${who} ha recuperado una carta de su cementerio a su mano.` }[fromZone];
+    } else if (to === 'graveyard') {
+      text = { library: `${who} ha mandado la carta de arriba de su biblioteca al cementerio.`, hand: `${who} ha descartado una carta de su mano.`, play: `${who} ha mandado ${name} al cementerio.` }[fromZone];
+    } else if (to === 'library') {
+      text = { hand: `${who} ha puesto una carta de su mano encima de su biblioteca.`, play: `${who} ha puesto ${name} encima de su biblioteca.`, graveyard: `${who} ha puesto una carta de su cementerio encima de su biblioteca.` }[fromZone];
+    }
+    this.addLog(text || `${who} ha movido una carta a ${ZONE_NAMES[to]}.`);
     // La carta soltada en juego no se queda seleccionada
     return;
   }
 
-  act_flip(seat, msg) {
+  act_flip(seat, msg, library) {
     const c = this.cards.get(msg.id);
     if (!c || c.zone !== 'play' || c.side !== seat) throw new Error('Solo puedes voltear cartas de tu zona de juego');
     c.isFaceUp = !c.isFaceUp;
-    this.addLog(`${this.nameOf(seat)} ha volteado una carta ${c.isFaceUp ? 'boca arriba' : 'boca abajo'}.`);
+    const name = this.cardLabel({ ...c, isFaceUp: true }, library);
+    this.addLog(c.isFaceUp ? `${this.nameOf(seat)} ha revelado ${name}.` : `${this.nameOf(seat)} ha puesto ${name} boca abajo.`);
   }
 
-  act_rotate(seat, msg) {
+  act_rotate(seat, msg, library) {
     const c = this.cards.get(msg.id);
     if (!c || c.zone !== 'play' || c.side !== seat) throw new Error('Solo puedes girar cartas de tu zona de juego');
     c.rotation += msg.deg === -90 ? -90 : 90;
+    const straight = ((c.rotation % 360) + 360) % 360 === 0;
+    this.addLog(straight ? `${this.nameOf(seat)} ha enderezado ${this.cardLabel(c, library)}.` : `${this.nameOf(seat)} ha girado ${this.cardLabel(c, library)}.`);
   }
 
   // Reordenar la mano propia
@@ -414,7 +436,19 @@ export class Game {
     const prev = this.life[seat];
     if (value === prev) return;
     this.life[seat] = value;
-    this.addLog(`${this.nameOf(seat)}: vida ${prev} → ${value}.`);
+    // Los toques seguidos en + / − se juntan en una sola línea
+    const last = this.log[this.log.length - 1];
+    if (last?.life?.seat === seat && Date.now() - last.at < 8000) {
+      const from = last.life.from;
+      const d = value - from;
+      last.text = `${this.nameOf(seat)}: vida ${from} → ${value} (${d > 0 ? '+' : ''}${d}).`;
+      last.at = Date.now();
+      if (d === 0) this.log.pop();
+      return;
+    }
+    const d = value - prev;
+    this.addLog(`${this.nameOf(seat)}: vida ${prev} → ${value} (${d > 0 ? '+' : ''}${d}).`);
+    this.log[this.log.length - 1].life = { seat, from: prev };
   }
 
   // Tokens: fichas que se ponen encima de las cartas. Las coordenadas llegan
@@ -425,7 +459,7 @@ export class Game {
     return seat === 'p1' ? { x: cx, y: cy } : { x: BOARD_W - TOKEN_SIZE - cx, y: BOARD_H - TOKEN_SIZE - cy };
   }
 
-  act_tokenAdd(seat, msg) {
+  act_tokenAdd(seat, msg, library) {
     if (this.tokens.length >= 60) throw new Error('Hay demasiados tokens en la mesa');
     if (msg.cardId) {
       // Token fijado a una carta en juego
@@ -435,7 +469,7 @@ export class Game {
       // rx/ry: posición dentro de la carta (0-1), igual para los dos jugadores; nace abajo y se puede mover
       const n = this.tokens.filter((t) => t.cardId === card.id).length;
       this.tokens.push({ id: randomId('token'), cardId: card.id, rx: 0.8, ry: Math.max(0.1, 0.88 - n * 0.16) });
-      this.addLog(`${this.nameOf(seat)} ha puesto un token en una carta.`);
+      this.addLog(`${this.nameOf(seat)} ha puesto un token en ${this.cardLabel(card, library)}${n ? ` (ya tiene ${n + 1})` : ''}.`);
       return;
     }
     const x = isNum(msg.x) ? msg.x : BOARD_W / 2 - TOKEN_SIZE / 2;
@@ -457,10 +491,14 @@ export class Game {
     Object.assign(t, this.toP1(seat, msg.x, msg.y));
   }
 
-  act_tokenDelete(seat, msg) {
-    const before = this.tokens.length;
-    this.tokens = this.tokens.filter((k) => k.id !== msg.id);
-    if (this.tokens.length !== before) this.addLog(`${this.nameOf(seat)} ha quitado un token.`);
+  act_tokenDelete(seat, msg, library) {
+    const t = this.tokens.find((k) => k.id === msg.id);
+    if (!t) return;
+    this.tokens = this.tokens.filter((k) => k !== t);
+    const card = t.cardId && this.cards.get(t.cardId);
+    if (!card) return this.addLog(`${this.nameOf(seat)} ha quitado un token.`);
+    const left = this.tokens.filter((k) => k.cardId === card.id).length;
+    this.addLog(`${this.nameOf(seat)} ha quitado un token de ${this.cardLabel(card, library)}${left ? ` (le ${left === 1 ? 'queda 1' : `quedan ${left}`})` : ''}.`);
   }
 
   // Enseñar (o volver a ocultar) toda la mano al rival
