@@ -244,6 +244,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
     pos: Map<string, { x: number; y: number; w: number; el: HTMLElement; side: SideKey; zone: string }>;
     ids: Set<string>;
     lib: Record<SideKey, number>;
+    grave: Record<SideKey, number>;
     oppHand: number;
   } | null>(null);
   useLayoutEffect(() => {
@@ -267,7 +268,8 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
     for (const c of state.oppHand) if (c.id) ids.add(c.id);
     const lib = { me: state.me.library.count, opp: state.opp.library.count };
     const prev = flipPrev.current;
-    flipPrev.current = { pos, ids, lib, oppHand: state.oppHand.length };
+    const grave = { me: state.me.graveyard.length, opp: state.opp.graveyard.length };
+    flipPrev.current = { pos, ids, lib, grave, oppHand: state.oppHand.length };
     if (!prev) return;
 
     const libCenter = (side: SideKey) => {
@@ -325,9 +327,58 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
       );
     }
 
+    // Cementerio barajado en la biblioteca: las cartas vuelan una tras otra y el mazo se agita
+    const recycled = new Set<string>();
+    for (const side of ['me', 'opp'] as SideKey[]) {
+      if (!(prev.grave[side] > 1 && grave[side] === 0 && lib[side] > prev.lib[side])) continue;
+      const pile = vanished.filter(([, b]) => b.side === side && b.zone === 'graveyard');
+      if (!pile.length) continue;
+      pile.forEach(([id]) => recycled.add(id));
+      const top = pile[pile.length - 1][1];
+      const to = libCenter(side);
+      const n = Math.min(prev.grave[side], 14);
+      const step = Math.min(70, 900 / n);
+      for (let i = 0; i < n; i++) {
+        const el = top.el.cloneNode(true) as HTMLElement;
+        el.removeAttribute('data-fid');
+        el.className = '';
+        el.style.left = `${top.x - SMALL_W / 2}px`;
+        el.style.top = `${top.y - SMALL_H / 2}px`;
+        el.style.opacity = '1';
+        el.style.pointerEvents = 'none';
+        el.style.zIndex = String(500000 + i);
+        board.appendChild(el);
+        const dx = to.x - top.x;
+        const dy = to.y - top.y;
+        const lift = (side === 'me' ? -1 : 1) * (40 + (i % 3) * 12); // un pequeño arco al volar
+        const anim = el.animate(
+          [
+            { translate: '0px 0px', rotate: '0deg', scale: '1', opacity: 1 },
+            { translate: `${dx * 0.5}px ${dy * 0.5 + lift}px`, rotate: `${45 + ((i * 37) % 30) - 15}deg`, scale: '1.08', opacity: 1, offset: 0.5 },
+            { translate: `${dx}px ${dy}px`, rotate: '90deg', scale: '1', opacity: 0.9 },
+          ],
+          { duration: 520, delay: i * step, easing: 'cubic-bezier(0.4, 0, 0.2, 1)', fill: 'backwards' },
+        );
+        anim.onfinish = anim.oncancel = () => el.remove();
+      }
+      // Al llegar todas, el mazo se baraja (se agita un momento)
+      const libEl = board.querySelector<HTMLElement>(`[data-lib="${side}"]`);
+      libEl?.animate(
+        [
+          { translate: '0px 0px', rotate: '0deg' },
+          { translate: '-6px 0px', rotate: '-4deg' },
+          { translate: '6px 0px', rotate: '4deg' },
+          { translate: '-4px 0px', rotate: '-2deg' },
+          { translate: '0px 0px', rotate: '0deg' },
+        ],
+        { duration: 450, delay: (n - 1) * step + 480, easing: 'ease-in-out' },
+      );
+      for (const [, b] of pile) b.el.remove();
+    }
+
     // Cartas que se van a una biblioteca o a la mano oculta del rival
     for (const [id, before] of vanished) {
-      if (paired.has(id)) continue;
+      if (paired.has(id) || recycled.has(id)) continue;
       let to: { x: number; y: number } | null = null;
       if (lib[before.side] > prev.lib[before.side]) to = libCenter(before.side);
       else if (lib.me > prev.lib.me) to = libCenter('me');
@@ -736,6 +787,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
       <React.Fragment key={`lib-${side}`}>
         {top && (
           <div
+            data-lib={side}
             title={canControl(side) ? 'Clic: robar · Arrastrar: coger la carta de arriba' : undefined}
             onPointerDown={canControl(side) ? (e) => startDrag(e, { kind: 'library', back: top, side }, cx, cy) : undefined}
             style={{
