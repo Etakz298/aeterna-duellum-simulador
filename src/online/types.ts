@@ -67,6 +67,7 @@ export interface OnlineState {
   players: Partial<Record<Seat, OnlinePlayer>>;
   starter?: Seat; // quién juega el primer turno
   started?: boolean; // ya se ha jugado alguna carta en esta partida
+  oppSelected?: string | null; // carta en juego que tiene seleccionada el rival
   me: OnlineSide;
   opp: OnlineSide;
   hand: OnlineHandCard[];
