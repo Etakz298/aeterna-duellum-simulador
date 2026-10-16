@@ -1163,6 +1163,12 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
 
   // Contadores de vida redondos, fijos: el tuyo a la izquierda y el del rival a la derecha
   // Carta de vida del mazo (de 10 a 0): el token marca la vida y se mueve con + y −
+  const backUrlOf = (side: SideKey) => {
+    const deckId = state.players[seatOf(side)]?.deckId;
+    return deckId ? library.backs[`backA-${deckId}`] || library.backs[`backB-${deckId}`] : undefined;
+  };
+  const myBackColor = useBackColor(backUrlOf('me'));
+  const oppBackColor = useBackColor(backUrlOf('opp'));
   const lifeTemplateOf = (side: SideKey) => {
     const deckId = state.players[seatOf(side)]?.deckId;
     return deckId ? library.templates.find((t) => t.deckId === deckId && t.isLife && t.imageUrl) : undefined;
@@ -1182,7 +1188,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
     const btnStyle: React.CSSProperties = compact ? { width: 54, height: 54, fontSize: 30 } : { width: ui.life + 6, height: ui.life + 6, fontSize: isTouch ? 26 : 22 };
     return (
       <React.Fragment key={`life-${side}`}>
-        <LifeAura left={left} top={top} w={w} h={h} />
+        <LifeAura left={left} top={top} w={w} h={h} color={(side === 'me' ? myBackColor : oppBackColor) || '#facc15'} />
         <div
           title={mine ? undefined : `Vida: ${value}`}
           style={{
@@ -2388,28 +2394,61 @@ const Overlay: React.FC<{ onClose: () => void; children: React.ReactNode }> = ({
   </div>
 );
 
-// Borde animado de la carta de vida: un brillo que gira y partículas que dan vueltas alrededor
-const AURA_PARTICLES = Array.from({ length: 28 }, (_, i) => ({
-  delay: -(i / 28) * 9 - (i % 3) * 0.37,
-  size: 4 + ((i * 7) % 5),
-  drift: ((i * 5) % 7) - 3,
-  twinkle: 1.2 + ((i * 3) % 5) * 0.3,
-}));
-
-function LifeAura({ left, top, w, h }: { left: number; top: number; w: number; h: number }) {
-  const m = 7; // separación entre la carta y el recorrido de las partículas
-  const W = w + m * 2;
-  const H = h + m * 2;
-  const r = 20;
-  const path = `path('M ${r} 0 H ${W - r} A ${r} ${r} 0 0 1 ${W} ${r} V ${H - r} A ${r} ${r} 0 0 1 ${W - r} ${H} H ${r} A ${r} ${r} 0 0 1 0 ${H - r} V ${r} A ${r} ${r} 0 0 1 ${r} 0 Z')`;
+// Borde animado de la carta de vida: un brillo que gira lento con el color del reverso del campeón
+function LifeAura({ left, top, w, h, color }: { left: number; top: number; w: number; h: number; color: string }) {
+  const m = 6; // separación entre la carta y el borde
   return (
-    <div className="ol-aura" style={{ left: left - m, top: top - m, width: W, height: H }}>
+    <div className="ol-aura" style={{ left: left - m, top: top - m, width: w + m * 2, height: h + m * 2, ['--aura-c' as string]: color } as React.CSSProperties}>
       <div className="ol-aura-ring" />
-      {AURA_PARTICLES.map((p, i) => (
-        <span key={i} className="ol-aura-p" style={{ offsetPath: path, animationDelay: `${p.delay}s` } as React.CSSProperties}>
-          <i style={{ width: p.size, height: p.size, transform: `translateY(${p.drift}px)`, animationDuration: `${p.twinkle}s`, animationDelay: `${p.delay}s` }} />
-        </span>
-      ))}
     </div>
   );
+}
+
+// Color del reverso: los reversos son rayas de dos tonos del mismo color más el blanco de los iconos.
+// Se juntan los píxeles con color en grupos y, de los dos tonos más repetidos, se elige el más oscuro.
+const backColorCache = new Map<string, string | null>();
+function useBackColor(url: string | undefined): string | null {
+  const [, force] = useState(0);
+  useEffect(() => {
+    if (!url || backColorCache.has(url)) return;
+    backColorCache.set(url, null);
+    const img = new Image();
+    if (!url.startsWith('data:') && !url.startsWith('blob:')) img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      try {
+        const S = 48;
+        const cv = document.createElement('canvas');
+        cv.width = S;
+        cv.height = S;
+        const ctx = cv.getContext('2d', { willReadFrequently: true })!;
+        ctx.drawImage(img, 0, 0, S, S);
+        const d = ctx.getImageData(0, 0, S, S).data;
+        const groups = new Map<number, { n: number; r: number; g: number; b: number }>();
+        for (let i = 0; i < d.length; i += 4) {
+          const [r, g, b, a] = [d[i], d[i + 1], d[i + 2], d[i + 3]];
+          const max = Math.max(r, g, b);
+          const min = Math.min(r, g, b);
+          if (a < 200 || max < 40 || max - min < 40) continue; // transparente, negro o blanco/gris
+          const key = ((r >> 4) << 8) | ((g >> 4) << 4) | (b >> 4);
+          const e = groups.get(key) || { n: 0, r: 0, g: 0, b: 0 };
+          e.n++;
+          e.r += r;
+          e.g += g;
+          e.b += b;
+          groups.set(key, e);
+        }
+        const top = [...groups.values()].sort((x, y) => y.n - x.n).slice(0, 2).map((e) => [e.r / e.n, e.g / e.n, e.b / e.n]);
+        if (top.length) {
+          const lum = (c: number[]) => 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2];
+          const c = top.length > 1 && lum(top[1]) < lum(top[0]) ? top[1] : top[0];
+          backColorCache.set(url, `rgb(${c.map(Math.round).join(', ')})`);
+          force((n) => n + 1);
+        }
+      } catch {
+        /* imagen de otro origen sin permiso: se queda el color por defecto */
+      }
+    };
+    img.src = url;
+  }, [url]);
+  return url ? backColorCache.get(url) || null : null;
 }
