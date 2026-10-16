@@ -588,9 +588,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     )}
                     {/* Especial (siempre arriba) y Vida (contador de vida), como en la lista del mazo */}
                     <button
-                      title="Especial: al poner el mazo en la mesa o barajarlo, esta carta queda siempre arriba"
+                      title="Especial (solo una por mazo): carta de guía de habilidades. Siempre queda arriba del mazo y los dos jugadores la pueden ver"
                       onClick={() =>
-                        setPendingBatch((prev) => prev.map((it, i) => (i === idx ? { ...it, isSpecial: !it.isSpecial } : it)))
+                        // Solo una Especial por mazo: marcar una desmarca las demás
+                        setPendingBatch((prev) => prev.map((it, i) => ({ ...it, isSpecial: i === idx ? !it.isSpecial : false })))
                       }
                       style={{
                         padding: '1px 5px',
@@ -1050,7 +1051,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                               {/* Carta especial: siempre en la parte superior del mazo */}
                               <button
                                 onClick={() => onUpdateTemplateSpecial(template.id, !template.isSpecial)}
-                                title="Especial: al poner el mazo en la mesa o barajarlo, esta carta queda siempre arriba"
+                                title="Especial (solo una por mazo): carta de guía de habilidades. Siempre queda arriba del mazo y los dos jugadores la pueden ver"
                                 style={{
                                   padding: '2px 6px',
                                   fontSize: '0.65rem',

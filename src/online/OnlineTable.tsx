@@ -867,7 +867,15 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
           <div
             data-lib={side}
             title={canControl(side) ? 'Clic: robar · Arrastrar: coger la carta de arriba' : undefined}
-            onPointerDown={canControl(side) ? (e) => startDrag(e, { kind: 'library', back: top, side }, cx, cy) : undefined}
+            onPointerDown={
+              canControl(side)
+                ? (e) => startDrag(e, { kind: 'library', back: top, side }, cx, cy, top.templateId)
+                : top.templateId
+                  ? (e) => startDrag(e, { kind: 'view' }, 0, 0, top.templateId)
+                  : undefined
+            }
+            onPointerEnter={(e) => top.templateId && showPreview(e, `special-lib-${side}`, top.templateId)}
+            onPointerLeave={hidePreview}
             style={{
               ...cardFrame,
               left: cx,
@@ -879,7 +887,8 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
               zIndex: 5,
             }}
           >
-            {cardImage(undefined, top, false)}
+            {/* La carta Especial se ve boca arriba también en la biblioteca */}
+            {cardImage(top.templateId, top, !!top.templateId)}
           </div>
         )}
         <div style={{ ...pill, left: r.x + r.w / 2, top: side === 'me' ? r.y + SMALL_H + 14 : r.y + 8 }}>
@@ -922,7 +931,9 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
               data-side={side}
               data-zone="graveyard"
               className={isTop ? 'ol-grave-enter' : undefined}
-              onPointerDown={isTop ? (e) => startDrag(e, { kind: 'graveyard', id: c.id, side, back: c }, x, y) : undefined}
+              onPointerDown={isTop ? (e) => startDrag(e, { kind: 'graveyard', id: c.id, side, back: c }, x, y, c.templateId) : undefined}
+              onPointerEnter={(e) => isTop && c.templateId && showPreview(e, `special-grave-${c.id}`, c.templateId)}
+              onPointerLeave={hidePreview}
               title={isTop ? 'Arrastra la carta de arriba para cogerla' : undefined}
               style={{
                 ...cardFrame,
@@ -936,7 +947,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
                 zIndex: 5 + i,
               }}
             >
-              {cardImage(undefined, c, false)}
+              {cardImage(c.templateId, c, !!c.templateId)}
             </div>
           );
         })}
@@ -1291,7 +1302,6 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
               background: 'radial-gradient(circle at 35% 30%, #fde68a, #facc15 55%, #ca8a04)',
               border: '3px solid #000',
               boxShadow: '0 6px 12px rgba(0,0,0,0.55)',
-              opacity: 0.92,
               transition: 'left 0.3s ease-out, top 0.3s ease-out',
               pointerEvents: 'none',
             }}
@@ -1570,7 +1580,10 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
     !drag &&
     (state.hand.some((c) => c.id === hoverTemplate.cardId) ||
       state.oppHand.some((c, i) => (c.id ?? `opp-hand-${i}`) === hoverTemplate.cardId && c.templateId === hoverTemplate.templateId) ||
-      [...state.me.play, ...state.opp.play].some((c) => c.id === hoverTemplate.cardId && c.isFaceUp));
+      [...state.me.play, ...state.opp.play].some((c) => c.id === hoverTemplate.cardId && c.isFaceUp) ||
+      // Carta Especial arriba de una biblioteca o en un cementerio
+      (hoverTemplate.cardId.startsWith('special-') &&
+        [state.me, state.opp].some((sd) => sd.library.top?.templateId === hoverTemplate.templateId || sd.graveyard.some((g) => g.templateId === hoverTemplate.templateId))));
   // Con ratón, la carta seleccionada se queda ampliada aunque el ratón salga de ella (para mover sus tokens desde ahí)
   const selectedPreview = !isTouch && selectedCard?.isFaceUp && selectedCard.templateId ? selectedCard : null;
   const previewTemplate = pressPreview
@@ -2143,7 +2156,6 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
                     background: 'radial-gradient(circle at 35% 30%, #fde68a, #facc15 55%, #ca8a04)',
                     border: '4px solid #000',
                     boxShadow: '0 8px 16px rgba(0,0,0,0.55)',
-                    opacity: 0.92,
                     transition: 'left 0.3s ease-out, top 0.3s ease-out',
                   }}
                 />

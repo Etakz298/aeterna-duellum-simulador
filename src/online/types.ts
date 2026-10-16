@@ -24,8 +24,8 @@ export interface CardBackInfo {
 }
 
 export interface OnlineSide {
-  library: { count: number; top: CardBackInfo | null };
-  graveyard: (CardBackInfo & { id: string })[];
+  library: { count: number; top: (CardBackInfo & { templateId?: string }) | null }; // templateId solo si es la carta Especial
+  graveyard: (CardBackInfo & { id: string; templateId?: string })[]; // templateId solo si es la carta Especial
   play: OnlinePlayCard[];
   handCount: number;
 }
