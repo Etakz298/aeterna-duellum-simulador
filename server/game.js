@@ -324,7 +324,7 @@ export class Game {
       card.x = clamp(isNum(msg.x) ? msg.x : card.x, 0, PLAY_W - CARD_W);
       card.y = clamp(isNum(msg.y) ? msg.y : card.y, 0, PLAY_H - CARD_H);
       card.order = this.nextOrder();
-      return { fx: { select: [card.id], by: seat } };
+      return;
     }
 
     let faceUp;
@@ -346,7 +346,8 @@ export class Game {
     if (to === 'play' && card.isFaceUp) what = 'una carta boca arriba';
     if (to === 'play' && !card.isFaceUp) what = 'una carta boca abajo';
     this.addLog(`${who} ha movido ${what} ${fromText} a ${ZONE_NAMES[to]}.`);
-    return { fx: to === 'play' ? { select: [card.id], by: seat } : undefined };
+    // La carta soltada en juego no se queda seleccionada
+    return;
   }
 
   act_flip(seat, msg) {
