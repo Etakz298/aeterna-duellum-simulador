@@ -175,6 +175,14 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
   const smallBtn: React.CSSProperties = isTouch ? { padding: '6px 12px', fontSize: 16 } : { padding: '3px 10px', fontSize: 13 };
   // Con el dedo, tocar una carta la muestra en grande unos segundos
   const previewTimer = useRef<number | undefined>(undefined);
+  // Carta en juego tocada: pasa por delante de las demás (con sus tokens) unos segundos
+  const [raisedId, setRaisedId] = useState<string | null>(null);
+  const raiseTimer = useRef<number | undefined>(undefined);
+  const raiseCard = (id: string) => {
+    window.clearTimeout(raiseTimer.current);
+    setRaisedId(id);
+    raiseTimer.current = window.setTimeout(() => setRaisedId(null), 5000);
+  };
   const hidePressPreview = () => {
     window.clearTimeout(previewTimer.current);
     setPressPreview(null);
@@ -484,6 +492,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
 
   const startDrag = (e: React.PointerEvent, src: DragSource, itemX: number, itemY: number, previewTemplateId?: string) => {
     if (e.button !== 0) return;
+    if (src.kind === 'play') raiseCard(src.id);
     e.preventDefault();
     e.stopPropagation();
     const p = toBoard(e.clientX, e.clientY);
@@ -868,7 +877,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
             top: pos.y,
             width: L.cardW,
             height: L.cardH,
-            zIndex: 20 + (slot?.slot ?? 0) * 2,
+            zIndex: c.id === raisedId ? 250 : 20 + (slot?.slot ?? 0) * 2,
             cursor: 'grab',
             opacity: isDragged('play', c.id) ? 0.25 : 1,
           }}
@@ -1298,7 +1307,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
             transition: dragging ? 'transform 0.15s' : 'left 0.35s cubic-bezier(0.25, 0.8, 0.25, 1), top 0.35s cubic-bezier(0.25, 0.8, 0.25, 1), transform 0.15s',
             cursor: 'grab',
             // Justo encima de su carta: otra carta que se le ponga encima lo tapa
-            zIndex: dragging ? 500000 : 21 + slot.slot * 2,
+            zIndex: dragging ? 500000 : t.cardId === raisedId ? 251 : 21 + slot.slot * 2,
             outline: selectedTokenId === t.id ? '3px solid var(--color-accent)' : 'none',
             outlineOffset: 3,
           }}
