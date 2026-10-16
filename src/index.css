@@ -535,11 +535,14 @@ html.js-h #root {
   height: var(--app-h);
 }
 
-/* Móvil: vista de la carta tocada */
-@keyframes ol-tap-preview-in {
-  from { opacity: 0; transform: translateX(30px); }
-  to { opacity: 1; transform: none; }
+/* Móvil en vertical: la aplicación se gira 90º para jugar siempre en horizontal */
+html.rot-landscape #root {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: var(--app-w);
+  height: var(--app-h);
+  transform-origin: top left;
+  transform: rotate(90deg) translateY(-100%);
 }
-.ol-tap-preview {
-  animation: ol-tap-preview-in 0.18s ease-out;
-}
+
