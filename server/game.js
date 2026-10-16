@@ -428,9 +428,9 @@ export class Game {
       const card = this.cards.get(msg.cardId);
       if (!card || card.zone !== 'play') throw new Error('Esa carta ya no está en juego');
       if (this.tokens.filter((t) => t.cardId === card.id).length >= 6) throw new Error('Esa carta ya tiene muchos tokens');
-      // rx/ry: posición dentro de la carta (0-1), igual para los dos jugadores
+      // rx/ry: posición dentro de la carta (0-1), igual para los dos jugadores; nace abajo y se puede mover
       const n = this.tokens.filter((t) => t.cardId === card.id).length;
-      this.tokens.push({ id: randomId('token'), cardId: card.id, rx: 0.8, ry: Math.min(0.9, 0.12 + n * 0.16) });
+      this.tokens.push({ id: randomId('token'), cardId: card.id, rx: 0.8, ry: Math.max(0.1, 0.88 - n * 0.16) });
       this.addLog(`${this.nameOf(seat)} ha puesto un token en una carta.`);
       return;
     }

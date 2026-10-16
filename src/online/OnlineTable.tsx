@@ -406,7 +406,9 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
       );
       anim.onfinish = anim.oncancel = () => ghostEl.remove();
     }
-  });
+    // Solo cuando cambia la partida (o el tamaño de la mesa), no en cada movimiento del arrastre
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state, fit.scale, fit.compact]);
 
   // ---------- Datos derivados ----------
 
@@ -663,6 +665,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
   };
 
   const dragging = drag !== null;
+  const moveFrame = useRef(0);
   useEffect(() => {
     if (!dragging) return;
     const move = (e: PointerEvent) => {
@@ -677,9 +680,16 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
       }
       const next = { ...d, x: p.x, y: p.y, moved, shift: e.shiftKey };
       dragRef.current = next;
-      setDrag(next);
+      // Un repintado por fotograma como mucho: en el móvil llegan muchos más eventos
+      if (!moveFrame.current)
+        moveFrame.current = requestAnimationFrame(() => {
+          moveFrame.current = 0;
+          if (dragRef.current) setDrag(dragRef.current);
+        });
     };
     const up = (e: PointerEvent) => {
+      cancelAnimationFrame(moveFrame.current);
+      moveFrame.current = 0;
       const d = dragRef.current;
       dragRef.current = null;
       setDrag(null);
@@ -1335,7 +1345,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
       attachedIndex.set(t.cardId, k + 1);
       const size = attachedTokenSize;
       const rx = t.rx ?? 0.8;
-      const ry = t.ry ?? Math.min(0.9, 0.12 + k * 0.16);
+      const ry = t.ry ?? Math.max(0.1, 0.88 - k * 0.16);
       const dragging = drag && drag.moved && drag.src.kind === 'token' && drag.src.id === t.id;
       // Mientras se arrastra no sale de su carta
       const x = dragging ? clamp(drag.x - drag.grabX, slot.x - size / 2, slot.x + L.cardW - size / 2) : slot.x + rx * L.cardW - size / 2;
