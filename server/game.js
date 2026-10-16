@@ -94,14 +94,9 @@ export class Game {
     if (this.log.length > LOG_LIMIT) this.log.splice(0, this.log.length - LOG_LIMIT);
   }
 
-  // Nombre de una carta para el registro: solo si está boca arriba en juego (si no, el rival no la ve)
-  cardLabel(card, library, hidden = 'una carta boca abajo') {
-    if (card.zone === 'play' && card.isFaceUp) {
-      const t = library?.templates.find((tp) => tp.id === card.templateId);
-      if (t?.name) return `«${t.name}»`;
-      return 'una carta';
-    }
-    return hidden;
+  // Cómo se nombra una carta en el registro (sin el nombre del archivo de la imagen)
+  cardLabel(card, _library, hidden = 'una carta boca abajo') {
+    return card.zone === 'play' && card.isFaceUp ? 'una carta' : hidden;
   }
 
   bump() {
@@ -177,6 +172,11 @@ export class Game {
       players,
       starter: this.starter,
       started: this.started,
+      // Carta en juego que tiene seleccionada el rival
+      oppSelected: (() => {
+        const id = this.players[opp]?.selected;
+        return id && this.cards.get(id)?.zone === 'play' ? id : null;
+      })(),
       me: sideView(seat),
       opp: sideView(opp),
       hand: this.zoneCards(seat, 'hand').map((c) => ({ id: c.id, templateId: c.templateId, deckId: c.deckId, backType: c.backType })),
@@ -347,7 +347,9 @@ export class Game {
       else if (fromZone === 'graveyard') faceUp = msg.faceUp !== false;
       else faceUp = card.isFaceUp;
     }
-    this.place(card, seat, to, { x: msg.x, y: msg.y, faceUp, resetRotation: fromZone !== 'play' });
+    // Al cementerio se puede mandar una carta a cualquiera de los dos; al resto de zonas, solo a las tuyas
+    const target = to === 'graveyard' && SEATS.includes(msg.toSeat) ? msg.toSeat : seat;
+    this.place(card, target, to, { x: msg.x, y: msg.y, faceUp, resetRotation: fromZone !== 'play' });
 
     // Registro: dice qué carta es cuando se ve (boca arriba en juego)
     const who = this.nameOf(seat);
@@ -355,7 +357,9 @@ export class Game {
     const before = wasFaceUp && fromZone === 'play' ? this.cardLabel({ ...card, zone: 'play', isFaceUp: true }, library) : null;
     const name = to === 'play' ? this.cardLabel(card, library) : before || 'una carta';
     let text;
-    if (rival) {
+    if (target !== seat) {
+      text = `${who} ha mandado ${before || 'una carta'} al cementerio de ${this.nameOf(target)}.`;
+    } else if (rival) {
       const where = fromZone === 'play' ? `de la zona de juego de ${rival}` : `del cementerio de ${rival}`;
       text = `${who} ha cogido ${before || 'una carta'} ${where} y la ha llevado a ${ZONE_NAMES[to]}.`;
     } else if (to === 'play') {
@@ -370,6 +374,12 @@ export class Game {
     this.addLog(text || `${who} ha movido una carta a ${ZONE_NAMES[to]}.`);
     // La carta soltada en juego no se queda seleccionada
     return;
+  }
+
+  // La carta seleccionada se enseña al rival (solo cuál es, no qué carta es)
+  act_select(seat, msg) {
+    const c = msg.id ? this.cards.get(msg.id) : null;
+    this.players[seat].selected = c && c.zone === 'play' ? c.id : null;
   }
 
   act_flip(seat, msg, library) {
@@ -424,11 +434,10 @@ export class Game {
   }
 
   // Enseñar al rival una carta de la mano sin jugarla
-  act_reveal(seat, msg, library) {
+  act_reveal(seat, msg) {
     const c = this.cards.get(msg.id);
     if (!c || c.zone !== 'hand' || c.side !== seat) throw new Error('Esa carta no está en tu mano');
-    const t = library.templates.find((tp) => tp.id === c.templateId);
-    this.addLog(`${this.nameOf(seat)} enseña una carta de su mano: ${t ? t.name : 'carta'}.`, 'reveal');
+    this.addLog(`${this.nameOf(seat)} enseña una carta de su mano.`, 'reveal');
     return { fx: { reveal: { by: seat, templateId: c.templateId } } };
   }
 
@@ -472,7 +481,7 @@ export class Game {
       // rx/ry: posición dentro de la carta (0-1), igual para los dos jugadores; nace abajo y se puede mover
       const n = this.tokens.filter((t) => t.cardId === card.id).length;
       this.tokens.push({ id: randomId('token'), cardId: card.id, rx: 0.8, ry: Math.max(0.1, 0.88 - n * 0.16) });
-      this.addLog(`${this.nameOf(seat)} ha puesto un token en ${this.cardLabel(card, library)}${n ? ` (ya tiene ${n + 1})` : ''}.`);
+      this.addLog(`${this.nameOf(seat)} ha puesto un token en ${this.cardLabel(card, library)}${card.side !== seat ? ` de ${this.nameOf(card.side)}` : ''}${n ? ` (ya tiene ${n + 1})` : ''}.`);
       return;
     }
     const x = isNum(msg.x) ? msg.x : BOARD_W / 2 - TOKEN_SIZE / 2;
@@ -501,7 +510,7 @@ export class Game {
     const card = t.cardId && this.cards.get(t.cardId);
     if (!card) return this.addLog(`${this.nameOf(seat)} ha quitado un token.`);
     const left = this.tokens.filter((k) => k.cardId === card.id).length;
-    this.addLog(`${this.nameOf(seat)} ha quitado un token de ${this.cardLabel(card, library)}${left ? ` (le ${left === 1 ? 'queda 1' : `quedan ${left}`})` : ''}.`);
+    this.addLog(`${this.nameOf(seat)} ha quitado un token de ${this.cardLabel(card, library)}${card.side !== seat ? ` de ${this.nameOf(card.side)}` : ''}${left ? ` (le ${left === 1 ? 'queda 1' : `quedan ${left}`})` : ''}.`);
   }
 
   // Enseñar (o volver a ocultar) toda la mano al rival

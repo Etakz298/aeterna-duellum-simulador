@@ -154,6 +154,9 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
   // ampliada se abre manteniendo el dedo sobre la carta
   const isTouch = useMemo(() => typeof window !== 'undefined' && !!window.matchMedia?.('(pointer: coarse)').matches, []);
   const [pressPreview, setPressPreview] = useState<string | null>(null);
+  const [pressCard, setPressCard] = useState<string | null>(null); // carta en juego de la vista ampliada tocada
+  const [previewDrag, setPreviewDrag] = useState<{ id: string; rx: number; ry: number } | null>(null); // token movido en la vista ampliada
+  const hoverHideTimer = useRef<number | undefined>(undefined);
   const [pickClosed, setPickClosed] = useState(false); // menú de elegir campeón cerrado a mano
   useEffect(() => {
     if (!myInfo?.deckId) setPickClosed(false); // al reiniciar la partida se vuelve a preguntar
@@ -176,23 +179,33 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
   const zoneRect = L.zoneRect;
   const [menuOpen, setMenuOpen] = useState(false);
   const [lifeSel, setLifeSel] = useState<SideKey | null>(null);
+  const LIFE_SETTLE = 600; // ms sin tocar la vida para dar por buena la del servidor
   const [lifePending, setLifePending] = useState<Partial<Record<SideKey, { value: number; at: number }>>>({});
   const [lifeBig, setLifeBig] = useState<SideKey | null>(null); // carta de vida ampliada
+  const [lifeCheck, setLifeCheck] = useState(0);
   useEffect(() => {
-    // Se suelta el valor pendiente cuando el servidor ya lo tiene (o si tarda demasiado)
+    // Se suelta el valor pendiente cuando el servidor ya tiene ese valor y hace un rato que no se toca
+    // (las respuestas a los toques anteriores llegan con valores intermedios), o si tarda demasiado
     setLifePending((p) => {
       let changed = false;
       const next = { ...p };
       for (const side of ['me', 'opp'] as SideKey[]) {
         const v = p[side];
-        if (v && (v.value === state.life[side] || Date.now() - v.at > 3000)) {
+        const age = v ? Date.now() - v.at : 0;
+        if (v && ((v.value === state.life[side] && age >= LIFE_SETTLE) || age > 3000)) {
           delete next[side];
           changed = true;
         }
       }
       return changed ? next : p;
     });
-  }, [state.life]);
+  }, [state.life, lifeCheck]);
+  useEffect(() => {
+    // Mientras quede un valor pendiente se vuelve a mirar cada poco
+    if (!lifePending.me && !lifePending.opp) return;
+    const t = window.setTimeout(() => setLifeCheck((n) => n + 1), 250);
+    return () => window.clearTimeout(t);
+  }, [lifePending, lifeCheck]);
   const fullscreen = useIsFullscreen();
   const ui = compact
     ? { font: 15, pad: '8px 10px', icon: 16, pile: 40, life: 36 }
@@ -442,11 +455,11 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
     for (const url of Object.values(library.backs)) new Image().src = url;
   }, [library]);
 
-  const myPlay = state.me.play;
-  const controlledPlay = solo ? [...state.me.play, ...state.opp.play] : myPlay;
   const selectedHand = state.hand.find((c) => c.id === selectedHandId) || null;
   const selectedOppHand = solo ? state.oppHand.find((c) => c.id && c.id === selectedHandId) || null : null;
-  const selectedCard = controlledPlay.find((c) => c.id === selectedId) || null;
+  // Se puede seleccionar cualquier carta en juego (también las del rival, para ponerles tokens o mandarlas a su cementerio)
+  const allPlay = [...state.me.play, ...state.opp.play];
+  const selectedCard = allPlay.find((c) => c.id === selectedId) || null;
   const selectedSide: SideKey = selectedCard && state.opp.play.includes(selectedCard) ? 'opp' : 'me';
 
   // ---------- Zona de juego ordenada ----------
@@ -513,8 +526,17 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
     placeInPlay(side, mirroredPlay(side) ? 0 : (side === 'me' ? state.me : state.opp).play.length, { msg });
 
   useEffect(() => {
-    if (selectedId && !controlledPlay.some((c) => c.id === selectedId)) setSelectedId(null);
-  }, [controlledPlay, selectedId]);
+    if (selectedId && !allPlay.some((c) => c.id === selectedId)) setSelectedId(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.me.play, state.opp.play, selectedId]);
+  // El rival ve qué carta tienes seleccionada
+  const sentSelection = useRef<string | null>(null);
+  useEffect(() => {
+    if (solo || sentSelection.current === selectedId) return;
+    sentSelection.current = selectedId;
+    send({ t: 'select', id: selectedId });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId, solo]);
 
   useEffect(() => {
     if (selectRequest && selectRequest.length) setSelectedId(selectRequest[selectRequest.length - 1]);
@@ -530,10 +552,16 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
   // ---------- Acciones ----------
 
   const draw = (side: SideKey = 'me') => sendAs(side, { t: 'draw', count: 1 });
-  const flip = () => selectedCard && sendAs(selectedSide, { t: 'flip', id: selectedCard.id });
+  const flip = () => selectedCard && canControl(selectedSide) && sendAs(selectedSide, { t: 'flip', id: selectedCard.id });
   const tokenOnCard = () => selectedCard && sendAs(selectedSide, { t: 'tokenAdd', cardId: selectedCard.id });
   const moveSelected = (to: ZoneKey) => {
     if (!selectedCard) return;
+    if (!canControl(selectedSide)) {
+      // Carta del rival: solo se puede mandar a su cementerio
+      if (to === 'graveyard') send({ t: 'move', id: selectedCard.id, to, toSeat: seatOf('opp') });
+      setSelectedId(null);
+      return;
+    }
     sendAs(selectedSide, { t: 'move', id: selectedCard.id, to });
     setSelectedId(null);
   };
@@ -542,7 +570,6 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
   const setLife = (side: SideKey, value: number) => {
     const v = clamp(value, LIFE_MIN, LIFE_MAX);
     setLifePending((p) => ({ ...p, [side]: { value: v, at: Date.now() } }));
-    patchState((s) => ({ ...s, life: { ...s.life, [side]: v } }));
     sendAs(side, { t: 'life', value: v });
   };
   const lifeOf = (side: SideKey) => {
@@ -593,6 +620,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
       if (previewTemplateId) {
         window.clearTimeout(previewTimer.current);
         setPressPreview(previewTemplateId);
+        setPressCard(src.kind === 'play' ? src.id : null);
       } else hidePressPreview();
     }
   };
@@ -607,7 +635,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
       const wasToken = selectedTokenId;
       clearSelections();
       if (src.kind === 'library') draw(src.side);
-      else if (src.kind === 'play' && canControl(src.side)) setSelectedId(src.id);
+      else if (src.kind === 'play') setSelectedId(src.id);
       else if (src.kind === 'token') setSelectedTokenId(wasToken === src.id ? null : src.id);
       return;
     }
@@ -653,6 +681,12 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
         toSide = side;
         break;
       }
+    }
+    if (!to && !solo && inRect(zoneRect('opp', 'graveyard'), d.x, d.y) && !(src.kind === 'graveyard' && src.side === 'opp')) {
+      // Al cementerio del rival
+      const r = src.kind === 'library' ? { from: 'library', fromSide: seatOf(src.side) } : { id: src.id };
+      send({ t: 'move', ...r, to: 'graveyard', toSeat: seatOf('opp') });
+      return;
     }
     if (!to) return; // fuera de tus zonas: la carta vuelve a su sitio
 
@@ -745,9 +779,14 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
 
   const showPreview = (e: React.PointerEvent, cardId: string, templateId: string | undefined) => {
     if (!templateId || drag || e.pointerType === 'touch') return;
+    window.clearTimeout(hoverHideTimer.current);
     setHoverTemplate({ cardId, templateId });
   };
-  const hidePreview = () => setHoverTemplate(null);
+  // Se quita con un pequeño retraso: así da tiempo a llevar el ratón a los tokens de la vista ampliada
+  const hidePreview = () => {
+    window.clearTimeout(hoverHideTimer.current);
+    hoverHideTimer.current = window.setTimeout(() => setHoverTemplate(null), 250);
+  };
 
   // ---------- Pintado de cartas ----------
 
@@ -951,7 +990,8 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
     (side === 'me' ? state.me : state.opp).play.map((c) => {
       const slot = playLayout.get(c.id);
       const pos = slot ?? L.playCardPos(side, c.x, c.y);
-      const selected = canControl(side) && c.id === selectedId;
+      const selected = c.id === selectedId;
+      const oppSel = !solo && c.id === state.oppSelected; // la tiene seleccionada el rival
       // La carta que acabas de soltar no se desliza: ya está donde la dejaste
       const instant = Date.now() - (justDropped.current.get(c.id) || 0) < 500;
       return (
@@ -981,7 +1021,12 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
             style={{
               transform: `rotate(${c.rotation}deg)`,
               borderRadius: 'var(--card-radius)',
-              boxShadow: selected ? '0 0 0 3px var(--color-accent), 0 0 24px var(--color-accent-glow)' : 'none',
+              boxShadow: [
+                selected ? '0 0 0 3px var(--color-accent), 0 0 24px var(--color-accent-glow)' : '',
+                oppSel ? `0 0 0 ${selected ? 7 : 3}px #f97316, 0 0 22px rgba(249,115,22,0.6)` : '',
+              ]
+                .filter(Boolean)
+                .join(', ') || 'none',
             }}
           >
             {flipCard(c.templateId, c, c.isFaceUp)}
@@ -1526,7 +1571,75 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
     (state.hand.some((c) => c.id === hoverTemplate.cardId) ||
       state.oppHand.some((c, i) => (c.id ?? `opp-hand-${i}`) === hoverTemplate.cardId && c.templateId === hoverTemplate.templateId) ||
       [...state.me.play, ...state.opp.play].some((c) => c.id === hoverTemplate.cardId && c.isFaceUp));
-  const previewTemplate = pressPreview ? templateMap.get(pressPreview) : hoverStillThere ? templateMap.get(hoverTemplate!.templateId) : undefined;
+  // Con ratón, la carta seleccionada se queda ampliada aunque el ratón salga de ella (para mover sus tokens desde ahí)
+  const selectedPreview = !isTouch && selectedCard?.isFaceUp && selectedCard.templateId ? selectedCard : null;
+  const previewTemplate = pressPreview
+    ? templateMap.get(pressPreview)
+    : hoverStillThere
+      ? templateMap.get(hoverTemplate!.templateId)
+      : selectedPreview
+        ? templateMap.get(selectedPreview.templateId!)
+        : undefined;
+  const previewCardId = pressPreview ? pressCard : hoverStillThere ? hoverTemplate!.cardId : selectedPreview ? selectedPreview.id : null;
+  // Tokens de la carta ampliada: se ven y se pueden mover desde ahí
+  const previewTokens = (big: boolean) => {
+    if (!previewCardId) return null;
+    const list = state.tokens.filter((t) => t.cardId === previewCardId);
+    if (!list.length) return null;
+    const pos = (e: React.PointerEvent) => {
+      const box = (e.currentTarget as HTMLElement).parentElement!;
+      const r = appRect(box);
+      const p = appPoint(e.clientX, e.clientY);
+      return { rx: clamp((p.x - r.left) / r.width, 0, 1), ry: clamp((p.y - r.top) / r.height, 0, 1) };
+    };
+    return list.map((t, k) => {
+      const moving = previewDrag?.id === t.id ? previewDrag : null;
+      const rx = moving ? moving.rx : t.rx ?? 0.8;
+      const ry = moving ? moving.ry : t.ry ?? Math.max(0.1, 0.88 - k * 0.16);
+      return (
+        <div
+          key={t.id}
+          className="ol-preview-token"
+          title="Arrastra para mover el token"
+          onPointerEnter={() => window.clearTimeout(hoverHideTimer.current)}
+          onPointerLeave={() => !previewDrag && !pressPreview && hidePreview()}
+          onPointerDown={(e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+            window.clearTimeout(previewTimer.current);
+            window.clearTimeout(hoverHideTimer.current);
+            setPreviewDrag({ id: t.id, ...pos(e) });
+          }}
+          onPointerMove={(e) => previewDrag?.id === t.id && setPreviewDrag({ id: t.id, ...pos(e) })}
+          onPointerUp={(e) => {
+            if (previewDrag?.id !== t.id) return;
+            const p = pos(e);
+            setPreviewDrag(null);
+            patchState((st) => ({ ...st, tokens: st.tokens.map((x) => (x.id === t.id ? { ...x, ...p } : x)) }));
+            send({ t: 'tokenMove', id: t.id, ...p });
+            if (pressPreview && !big) previewTimer.current = window.setTimeout(() => setPressPreview(null), 8000);
+          }}
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            position: 'absolute',
+            left: `${rx * 100}%`,
+            top: `${ry * 100}%`,
+            width: '17%',
+            aspectRatio: '1',
+            transform: `translate(-50%, -50%)${moving ? ' scale(1.15)' : ''}`,
+            borderRadius: '50%',
+            background: '#facc15',
+            border: '3px solid #000',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.6)',
+            cursor: moving ? 'grabbing' : 'grab',
+            pointerEvents: 'auto',
+            touchAction: 'none',
+          }}
+        />
+      );
+    });
+  };
 
   const panelBox: React.CSSProperties = compact
     ? { position: 'relative', width: 'min(300px, 88vw)', padding: 14, display: 'flex', flexDirection: 'column', gap: 9, fontSize: 15 }
@@ -1685,6 +1798,29 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
     </div>
   );
 
+  // Registro más vistoso: nombres de los jugadores en negrita con el color de su campeón y cambios de vida resaltados
+  const logText = (text: string) => {
+    const people = (['me', 'opp'] as SideKey[])
+      .map((side) => ({ name: state.players[seatOf(side)]?.name, color: (side === 'me' ? myBackColor : oppBackColor) || '#e5e7eb' }))
+      .filter((p): p is { name: string; color: string } => !!p.name)
+      .sort((a, b) => b.name.length - a.name.length);
+    const esc = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const parts = [...people.map((p) => esc(p.name)), 'vida \\d+ → \\d+(?: \\([+-]?\\d+\\))?'];
+    const re = new RegExp(`(${parts.join('|')})`, 'g');
+    // split con un grupo: las posiciones impares son lo encontrado
+    return text.split(re).map((piece, i) => {
+      if (!piece) return null;
+      if (i % 2 === 1) {
+        const who = people.find((p) => p.name === piece);
+        return (
+          <strong key={i} style={{ color: who ? `color-mix(in srgb, ${who.color} 75%, white)` : '#fde047' }}>
+            {piece}
+          </strong>
+        );
+      }
+      return <React.Fragment key={i}>{piece}</React.Fragment>;
+    });
+  };
   const tokenDot: React.CSSProperties = { width: 12, height: 12, borderRadius: '50%', background: '#facc15', border: '2px solid #000', display: 'inline-block' };
   // Acciones de la carta seleccionada (barra flotante como en un jugador)
   const selectionBar = selectedCard && !compact && (
@@ -1709,9 +1845,11 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
       <button className="btn-secondary" onClick={tokenOnCard} title="Poner un token en esta carta (T)" style={btn}>
         <span style={tokenDot} /> Token
       </button>
-      <button className="btn-secondary" onClick={() => moveSelected('hand')} title="A la mano (H)" style={btn}>
-        <Hand size={ui.icon} /> A la mano
-      </button>
+      {canControl(selectedSide) && (
+        <button className="btn-secondary" onClick={() => moveSelected('hand')} title="A la mano (H)" style={btn}>
+          <Hand size={ui.icon} /> A la mano
+        </button>
+      )}
       <button className="btn-secondary" onClick={() => moveSelected('graveyard')} title="Al cementerio (G)" style={btn}>
         <Archive size={ui.icon} /> Cementerio
       </button>
@@ -1731,9 +1869,11 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
           <button className="btn-secondary" onClick={tokenOnCard} style={barBtn}>
             <span style={tokenDot} /> Token
           </button>
-          <button className="btn-secondary" onClick={() => moveSelected('hand')} style={barBtn}>
-            <Hand size={16} /> Mano
-          </button>
+          {canControl(selectedSide) && (
+            <button className="btn-secondary" onClick={() => moveSelected('hand')} style={barBtn}>
+              <Hand size={16} /> Mano
+            </button>
+          )}
           <button className="btn-secondary" onClick={() => moveSelected('graveyard')} style={barBtn}>
             <Archive size={16} /> Cementerio
           </button>
@@ -2018,41 +2158,53 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
             onClick={hidePressPreview}
             style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 700500, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
           >
-            <img
-              className="ol-preview-big"
-              src={previewTemplate.imageUrl}
-              alt={previewTemplate.name}
-              style={{ height: 'calc(100% - 16px)', maxWidth: 'calc(100% - 16px)', aspectRatio: `${CARD_W} / ${CARD_H}`, objectFit: 'contain', borderRadius: 16, boxShadow: '0 20px 60px rgba(0,0,0,0.9)' }}
-            />
+            <div className="ol-preview-big" style={{ position: 'relative', height: 'calc(100% - 16px)', maxWidth: 'calc(100% - 16px)', aspectRatio: `${CARD_W} / ${CARD_H}` }}>
+              <img
+                src={previewTemplate.imageUrl}
+                alt={previewTemplate.name}
+                style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block', borderRadius: 16, boxShadow: '0 20px 60px rgba(0,0,0,0.9)' }}
+              />
+              {previewTokens(true)}
+            </div>
           </div>
         )}
         {/* Vista ampliada de la carta bajo el ratón (o tocada: un toque en ella la agranda) */}
         {previewTemplate?.imageUrl && !previewBig && (
-          <img
-            src={previewTemplate.imageUrl}
-            alt={previewTemplate.name}
-            onPointerDown={pressPreview ? (e) => e.stopPropagation() : undefined}
-            onClick={
-              pressPreview
-                ? () => {
-                    window.clearTimeout(previewTimer.current);
-                    setPreviewBig(true);
-                  }
-                : undefined
-            }
+          <div
             style={{
               position: 'absolute',
               top: 12,
               right: 12, // siempre en la misma esquina
               height: 'min(480px, 62%)',
               aspectRatio: `${CARD_W} / ${CARD_H}`,
-              objectFit: 'cover',
-              borderRadius: 14,
-              boxShadow: '0 20px 50px rgba(0,0,0,0.8)',
-              pointerEvents: pressPreview ? 'auto' : 'none',
+              pointerEvents: 'none',
               zIndex: 600000,
             }}
-          />
+          >
+            <img
+              src={previewTemplate.imageUrl}
+              alt={previewTemplate.name}
+              onPointerDown={pressPreview ? (e) => e.stopPropagation() : undefined}
+              onClick={
+                pressPreview
+                  ? () => {
+                      window.clearTimeout(previewTimer.current);
+                      setPreviewBig(true);
+                    }
+                  : undefined
+              }
+              style={{
+                width: '100%',
+                height: '100%',
+                display: 'block',
+                objectFit: 'cover',
+                borderRadius: 14,
+                boxShadow: '0 20px 50px rgba(0,0,0,0.8)',
+                pointerEvents: pressPreview ? 'auto' : 'none',
+              }}
+            />
+            {previewTokens(false)}
+          </div>
         )}
 
         {/* Registro de la partida y chat */}
@@ -2080,7 +2232,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
                   }}
                 >
                   <span style={{ opacity: 0.5, marginRight: 4 }}>{new Date(entry.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                  {entry.text}
+                  {logText(entry.text)}
                 </div>
               ))}
               <div ref={logEndRef} />
@@ -2274,7 +2426,13 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
                 <button
                   key={seat}
                   className="btn-primary"
-                  style={{ padding: '10px 18px', fontSize: '0.95rem' }}
+                  style={(() => {
+                    // Cada botón con el color del reverso de su campeón: se ve quién gana sin leer
+                    const c = seat === me ? myBackColor : oppBackColor;
+                    return c
+                      ? { padding: '10px 18px', fontSize: '0.95rem', background: c, borderColor: c, color: '#fff', textShadow: '0 1px 3px rgba(0,0,0,0.7)', boxShadow: `0 4px 16px ${c}` }
+                      : { padding: '10px 18px', fontSize: '0.95rem' };
+                  })()}
                   onClick={() => {
                     send({ t: 'endMatch', winner: seat, reset: endReset });
                     setShowEnd(false);
