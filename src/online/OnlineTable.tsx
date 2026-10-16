@@ -2097,7 +2097,8 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
           <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap', maxHeight: compact ? 'calc(var(--app-h, 100vh) - 150px)' : '70vh', overflowY: 'auto' }}>
             {Object.entries(library.deckNames).map(([id, name]) => {
               const tpls = library.templates.filter((t) => t.deckId === id);
-              const cover = tpls.find((t) => t.isLife && t.imageUrl) || tpls.find((t) => !t.isLife && t.imageUrl);
+              // Reverso del mazo (siempre el tipo A; el B si no hay A)
+              const cover = library.backs[`backA-${id}`] || library.backs[`backB-${id}`];
               const count = tpls.filter((t) => !t.isLife).reduce((n, t) => n + (t.quantity || 1), 0);
               const taken = oppInfo?.deckId === id;
               return (
@@ -2108,10 +2109,10 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
                   onClick={() => pickDeck('me', id)}
                   style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, padding: 8, width: compact ? 120 : 170, opacity: taken || count === 0 ? 0.45 : 1 }}
                 >
-                  {cover?.imageUrl ? (
-                    <img src={cover.imageUrl} alt={name} style={{ width: '100%', aspectRatio: '800 / 1244', objectFit: 'cover', borderRadius: 8 }} />
+                  {cover ? (
+                    <img src={cover} alt={name} style={{ width: '100%', aspectRatio: `${CARD_W} / ${CARD_H}`, objectFit: 'cover', borderRadius: 8 }} />
                   ) : (
-                    <div style={{ width: '100%', aspectRatio: '800 / 1244', borderRadius: 8, background: 'rgba(255,255,255,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <div style={{ width: '100%', aspectRatio: `${CARD_W} / ${CARD_H}`, borderRadius: 8, background: 'rgba(255,255,255,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                       <Layers size={28} />
                     </div>
                   )}
