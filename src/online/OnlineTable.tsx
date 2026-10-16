@@ -48,6 +48,7 @@ import {
 import { inviteLink } from './server';
 import { MatchHistory } from './MatchHistory';
 import { IOS_FULLSCREEN_HINT, fullscreenSupported, toggleFullscreen, useIsFullscreen } from '../fullscreen';
+import { appPoint, appRect } from '../rotation';
 import type { ConnectionStatus } from './useOnlineGame';
 
 interface OnlineTableProps {
@@ -175,12 +176,11 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
       : { font: 14, pad: '7px 10px', icon: 14, pile: 40, life: 36 };
   const pileBtn: React.CSSProperties = { padding: 6, width: ui.pile, height: ui.pile, justifyContent: 'center' };
   const smallBtn: React.CSSProperties = isTouch ? { padding: '6px 12px', fontSize: 16 } : { padding: '3px 10px', fontSize: 13 };
-  const [tapPreview, setTapPreview] = useState<string | null>(null);
-  const tapTimer = useRef<number | undefined>(undefined);
-  const showTapPreview = (templateId: string) => {
-    window.clearTimeout(tapTimer.current);
-    setTapPreview(templateId);
-    tapTimer.current = window.setTimeout(() => setTapPreview(null), 4000);
+  // Con el dedo, tocar una carta la muestra en grande unos segundos
+  const previewTimer = useRef<number | undefined>(undefined);
+  const hidePressPreview = () => {
+    window.clearTimeout(previewTimer.current);
+    setPressPreview(null);
   };
   const clearSelections = () => {
     setSelectedId(null);
@@ -217,12 +217,127 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
 
   const toBoard = useCallback(
     (clientX: number, clientY: number) => {
-      const rect = boardRef.current?.getBoundingClientRect();
-      if (!rect) return { x: 0, y: 0 };
-      return { x: (clientX - rect.left) / fit.scale, y: (clientY - rect.top) / fit.scale };
+      if (!boardRef.current) return { x: 0, y: 0 };
+      const rect = appRect(boardRef.current);
+      const p = appPoint(clientX, clientY);
+      return { x: (p.x - rect.left) / fit.scale, y: (p.y - rect.top) / fit.scale };
     },
     [fit.scale],
   );
+
+  // ---------- Cartas que cambian de zona: se deslizan como en una mesa ----------
+  // Cada carta lleva data-fid con su id. Tras cada cambio se compara dónde estaba
+  // cada carta antes y dónde está ahora; si cambió de zona (otro elemento), la
+  // nueva se anima desde la posición anterior. Las que desaparecen hacia la
+  // biblioteca o la mano oculta del rival vuelan hasta allí.
+  const lastDrop = useRef<{ id?: string; lib?: SideKey; x: number; y: number; at: number } | null>(null);
+  const flipPrev = useRef<{
+    pos: Map<string, { x: number; y: number; w: number; el: HTMLElement; side: SideKey; zone: string }>;
+    ids: Set<string>;
+    lib: Record<SideKey, number>;
+    oppHand: number;
+  } | null>(null);
+  useLayoutEffect(() => {
+    const board = boardRef.current;
+    if (!board || !fit.scale) return;
+    const br = appRect(board);
+    const pos = new Map<string, { x: number; y: number; w: number; el: HTMLElement; side: SideKey; zone: string }>();
+    board.querySelectorAll<HTMLElement>('[data-fid]').forEach((el) => {
+      const r = appRect(el);
+      pos.set(el.dataset.fid!, {
+        x: (r.left + r.width / 2 - br.left) / fit.scale,
+        y: (r.top + r.height / 2 - br.top) / fit.scale,
+        w: parseFloat(el.style.width) || SMALL_W,
+        el,
+        side: el.dataset.side as SideKey,
+        zone: el.dataset.zone || '',
+      });
+    });
+    const ids = new Set<string>();
+    for (const c of [...state.me.play, ...state.opp.play, ...state.me.graveyard, ...state.opp.graveyard, ...state.hand]) ids.add(c.id);
+    for (const c of state.oppHand) if (c.id) ids.add(c.id);
+    const lib = { me: state.me.library.count, opp: state.opp.library.count };
+    const prev = flipPrev.current;
+    flipPrev.current = { pos, ids, lib, oppHand: state.oppHand.length };
+    if (!prev) return;
+
+    const libCenter = (side: SideKey) => {
+      const r = zoneRect(side, 'library');
+      return { x: r.x + 22 + SMALL_W / 2, y: side === 'me' ? r.y + 8 + SMALL_H / 2 : r.y + r.h - 8 - SMALL_H / 2 };
+    };
+    const oppHandCenter = () => {
+      const r = zoneRect('opp', 'hand');
+      return { x: r.x + r.w / 2, y: r.y + 8 + SMALL_H / 2 };
+    };
+    const drop = lastDrop.current && Date.now() - lastDrop.current.at < 2000 ? lastDrop.current : null;
+    const timing = { duration: 450, easing: 'cubic-bezier(0.25, 0.8, 0.25, 1)' };
+
+    // El motor cambia el id de una carta al cambiar de zona (para no poder seguirla
+    // en zonas ocultas), así que se empareja la carta que desaparece con la que aparece
+    const appeared = [...pos].filter(([id]) => !prev.ids.has(id));
+    const vanished = [...prev.pos].filter(([id]) => !ids.has(id) && !pos.has(id));
+    const pairs = new Map<string, string>();
+    if (appeared.length === 1 && vanished.length === 1) pairs.set(appeared[0][0], vanished[0][0]);
+    const paired = new Set(pairs.values());
+
+    // Cartas que aparecen en otro sitio
+    for (const [id, now] of appeared) {
+      const oldId = pairs.get(id);
+      if (drop && ((oldId && drop.id === oldId) || (drop.lib && !oldId))) {
+        lastDrop.current = null;
+        continue; // soltada con el dedo o el ratón: ya está donde la dejaste
+      }
+      let from: { x: number; y: number; w: number; zone: string } | null = null;
+      if (oldId) from = prev.pos.get(oldId)!;
+      else if (lib[now.side] < prev.lib[now.side]) from = { ...libCenter(now.side), w: SMALL_W, zone: 'library' };
+      else if (!solo && now.side === 'opp' && state.oppHand.length < prev.oppHand) from = { ...oppHandCenter(), w: SMALL_W, zone: 'hand' };
+      if (!from) continue;
+      const dx = from.x - now.x;
+      const dy = from.y - now.y;
+      if (Math.hypot(dx, dy) < 3) continue;
+      // Sin la animación de entrada: la carta llega volando
+      for (const a of now.el.getAnimations()) if (a instanceof CSSAnimation) a.cancel();
+      const turn = now.zone === 'graveyard' && from.zone !== 'graveyard' ? '90deg' : '0deg';
+      now.el.animate(
+        [
+          { translate: `${dx}px ${dy}px`, scale: String(from.w / now.w), rotate: turn, zIndex: 500000 },
+          { translate: '0px 0px', scale: '1', rotate: '0deg', zIndex: 500000 },
+        ],
+        timing,
+      );
+    }
+
+    // Cartas que se van a una biblioteca o a la mano oculta del rival
+    for (const [id, before] of vanished) {
+      if (paired.has(id)) continue;
+      let to: { x: number; y: number } | null = null;
+      if (lib[before.side] > prev.lib[before.side]) to = libCenter(before.side);
+      else if (lib.me > prev.lib.me) to = libCenter('me');
+      else if (lib.opp > prev.lib.opp) to = libCenter('opp');
+      else if (!solo && state.oppHand.length > prev.oppHand) to = oppHandCenter();
+      if (!to) continue;
+      const start = drop && drop.id === id ? drop : before;
+      if (drop && drop.id === id) lastDrop.current = null;
+      const ghostEl = before.el;
+      const w = parseFloat(ghostEl.style.width) || SMALL_W;
+      const h = parseFloat(ghostEl.style.height) || SMALL_H;
+      ghostEl.style.left = `${start.x - w / 2}px`;
+      ghostEl.style.top = `${start.y - h / 2}px`;
+      ghostEl.style.opacity = '1';
+      ghostEl.style.pointerEvents = 'none';
+      ghostEl.style.zIndex = '500000';
+      for (const a of ghostEl.getAnimations()) a.cancel();
+      board.appendChild(ghostEl);
+      const anim = ghostEl.animate(
+        [
+          { translate: '0px 0px', scale: '1', opacity: 1 },
+          { translate: `${to.x - start.x}px ${to.y - start.y}px`, scale: String(SMALL_W / w), opacity: 0.6 },
+        ],
+        timing,
+      );
+      anim.onfinish = anim.oncancel = () => ghostEl.remove();
+    }
+  });
 
   // ---------- Datos derivados ----------
 
@@ -308,20 +423,24 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
     const d: DragState = { src, startX: e.clientX, startY: e.clientY, grabX: p.x - itemX, grabY: p.y - itemY, x: p.x, y: p.y, moved: false, shift: e.shiftKey, preview: previewTemplateId };
     dragRef.current = d;
     setDrag(d);
-    // Mantener pulsado con el dedo: vista ampliada de la carta
     window.clearTimeout(pressTimer.current);
-    if (e.pointerType === 'touch' && (previewTemplateId || (compact && src.kind === 'library'))) {
-      pressTimer.current = window.setTimeout(() => {
-        const cur = dragRef.current;
-        if (cur && !cur.moved) {
-          dragRef.current = { ...cur, longPress: true };
-          // En móvil, mantener pulsado el mazo muestra barajar y mirar
-          if (src.kind === 'library') {
+    if (e.pointerType === 'touch') {
+      // Tocar una carta con el dedo: vista ampliada al momento (se quita si se arrastra)
+      if (previewTemplateId) {
+        window.clearTimeout(previewTimer.current);
+        setPressPreview(previewTemplateId);
+      } else hidePressPreview();
+      // En móvil, mantener pulsado el mazo muestra barajar y mirar
+      if (compact && src.kind === 'library') {
+        pressTimer.current = window.setTimeout(() => {
+          const cur = dragRef.current;
+          if (cur && !cur.moved) {
+            dragRef.current = { ...cur, longPress: true };
             clearSelections();
             setPileSel({ side: src.side, zone: 'library' });
-          } else setPressPreview(previewTemplateId!);
-        }
-      }, 450);
+          }
+        }, 450);
+      }
     }
   };
 
@@ -329,8 +448,6 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
   dropRef.current = (d: DragState) => {
     const { src } = d;
     if (d.longPress) return;
-    // Móvil: al tocar una carta se ve en grande unos segundos en el borde derecho
-    if (!d.moved && compact && d.preview) showTapPreview(d.preview);
     if (src.kind === 'view') return;
     if (!d.moved) {
       // Clic (o toque) sin arrastrar
@@ -347,6 +464,17 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
     }
     const left = d.x - d.grabX;
     const top = d.y - d.grabY;
+    if (src.kind !== 'token') {
+      // La animación de la carta soltada sale de donde la dejaste, no de su sitio anterior
+      const small = src.kind !== 'play';
+      lastDrop.current = {
+        id: src.kind === 'library' ? undefined : src.id,
+        lib: src.kind === 'library' ? src.side : undefined,
+        x: left + (small ? SMALL_W : L.cardW) / 2,
+        y: top + (small ? SMALL_H : L.cardH) / 2,
+        at: Date.now(),
+      };
+    }
 
     if (src.kind === 'token') {
       const { x, y } = L.fromView(clamp(left, 0, BOARD_W - TOKEN_SIZE), clamp(top, 0, L.boardH - TOKEN_SIZE));
@@ -418,9 +546,12 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
       const d = dragRef.current;
       if (!d) return;
       const p = toBoard(e.clientX, e.clientY);
-      if (d.longPress) return; // mientras se ve la carta ampliada no se arrastra
+      if (d.longPress) return; // mantener pulsado el mazo abre sus acciones: no se arrastra
       const moved = d.moved || Math.hypot(e.clientX - d.startX, e.clientY - d.startY) > (e.pointerType === 'touch' ? 10 : 5);
-      if (moved) window.clearTimeout(pressTimer.current);
+      if (moved && !d.moved) {
+        window.clearTimeout(pressTimer.current);
+        hidePressPreview();
+      }
       const next = { ...d, x: p.x, y: p.y, moved, shift: e.shiftKey };
       dragRef.current = next;
       setDrag(next);
@@ -430,7 +561,11 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
       dragRef.current = null;
       setDrag(null);
       window.clearTimeout(pressTimer.current);
-      setPressPreview(null);
+      // Un toque sin arrastrar deja la carta ampliada 8 segundos
+      if (d && !d.moved && d.preview && e.pointerType === 'touch' && e.type === 'pointerup') {
+        window.clearTimeout(previewTimer.current);
+        previewTimer.current = window.setTimeout(() => setPressPreview(null), 8000);
+      } else hidePressPreview();
       if (d && e.type === 'pointerup') dropRef.current({ ...d, shift: e.shiftKey });
     };
     window.addEventListener('pointermove', move);
@@ -593,6 +728,9 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
           return (
             <div
               key={c.id}
+              data-fid={c.id}
+              data-side={side}
+              data-zone="graveyard"
               className={isTop ? 'ol-grave-enter' : undefined}
               onPointerDown={isTop ? (e) => startDrag(e, { kind: 'graveyard', id: c.id, side, back: c }, x, y) : undefined}
               title={isTop ? 'Arrastra la carta de arriba para cogerla' : undefined}
@@ -666,6 +804,9 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
       return (
         <div
           key={c.id}
+          data-fid={c.id}
+          data-side={side}
+          data-zone="play"
           className={`ol-card ol-play ol-enter${instant ? ' ol-instant' : ''}`}
           onPointerDown={(e) => startDrag(e, { kind: 'play', id: c.id, side, card: c }, pos.x, pos.y, c.isFaceUp ? c.templateId : undefined)}
           onPointerEnter={(e) => c.isFaceUp && showPreview(e, c.id, c.templateId)}
@@ -751,6 +892,9 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
           return (
             <div
               key={c.id}
+              data-fid={c.id}
+              data-side="me"
+              data-zone="hand"
               className="ol-hand-enter"
               onPointerDown={(e) => startDrag(e, { kind: 'hand', id: c.id, templateId: c.templateId, back: c, side: 'me' }, slots[i], y, c.templateId)}
               onPointerEnter={(e) => {
@@ -829,6 +973,9 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
           return (
             <div
               key={id}
+              data-fid={id}
+              data-side="opp"
+              data-zone="hand"
               className="ol-hand-enter"
               onPointerDown={(e) => startDrag(e, { kind: 'hand', id, templateId: c.templateId!, back: c, side: 'opp' }, slots[i], y, c.templateId)}
               onPointerEnter={(e) => {
@@ -1515,8 +1662,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
         onPointerDown={() => {
           clearSelections();
           // Tocar el tablero vacío también quita la carta ampliada
-          window.clearTimeout(tapTimer.current);
-          setTapPreview(null);
+          hidePressPreview();
         }}
       >
         <div
@@ -1622,36 +1768,6 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
               <X size={16} />
             </button>
           </div>
-        )}
-
-        {/* Móvil: carta tocada, en grande en el borde derecho durante unos segundos */}
-        {compact && !previewTemplate && tapPreview && templateMap.get(tapPreview)?.imageUrl && (
-          <img
-            key={tapPreview}
-            className="ol-tap-preview"
-            src={templateMap.get(tapPreview)!.imageUrl}
-            alt={templateMap.get(tapPreview)!.name}
-            onPointerDown={(e) => {
-              e.stopPropagation();
-              setTapPreview(null);
-            }}
-            style={{
-              position: 'absolute',
-              top: 8,
-              right: 8,
-              height: 'calc(100% - 16px)',
-              maxWidth: '40%',
-              aspectRatio: `${CARD_W} / ${CARD_H}`,
-              objectFit: 'contain',
-              borderRadius: 12,
-              boxShadow: '0 20px 50px rgba(0,0,0,0.8)',
-              zIndex: 600000,
-              // Mientras se arrastra una carta se vuelve translúcida para ver las zonas de debajo
-              opacity: drag?.moved ? 0.25 : 1,
-              pointerEvents: drag?.moved ? 'none' : undefined,
-              transition: 'opacity 0.15s',
-            }}
-          />
         )}
 
         {/* Vista ampliada de la carta bajo el ratón */}

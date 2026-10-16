@@ -1,3 +1,4 @@
+import { appPoint, appRect } from '../rotation';
 import React, { useRef, useState, useEffect } from 'react';
 import type { BoardCard, LifeCounter as LifeCounterType, CardTemplate, Position } from '../types';
 import { CardItem } from './CardItem';
@@ -81,8 +82,9 @@ export const Tabletop: React.FC<TabletopProps> = ({
   useEffect(() => {
     if (!viewportRef) return;
     viewportRef.current = {
-      clientToBoard: (clientX: number, clientY: number) => {
-        const rect = tabletopRef.current?.getBoundingClientRect();
+      clientToBoard: (rawX: number, rawY: number) => {
+        const { x: clientX, y: clientY } = appPoint(rawX, rawY);
+        const rect = tabletopRef.current ? appRect(tabletopRef.current) : undefined;
         return {
           x: (clientX - (rect?.left || 0) - pan.x) / zoom,
           y: (clientY - (rect?.top || 0) - pan.y) / zoom,
@@ -108,9 +110,9 @@ export const Tabletop: React.FC<TabletopProps> = ({
       const zoomFactor = 1.08;
       const nextZoom = e.deltaY < 0 ? Math.min(zoom * zoomFactor, 3) : Math.max(zoom / zoomFactor, 0.25);
 
-      const rect = el.getBoundingClientRect();
-      const mouseX = e.clientX - rect.left;
-      const mouseY = e.clientY - rect.top;
+      const rect = appRect(el);
+      const mouseX = appPoint(e.clientX, e.clientY).x - rect.left;
+      const mouseY = appPoint(e.clientX, e.clientY).y - rect.top;
 
       // Board coordinates under mouse
       const boardMouseX = (mouseX - pan.x) / zoom;
@@ -169,11 +171,11 @@ export const Tabletop: React.FC<TabletopProps> = ({
   const handlePointerDown = (e: React.PointerEvent) => {
     if (e.button !== 0) return; // Only handle left click
 
-    const rect = tabletopRef.current?.getBoundingClientRect();
+    const rect = (tabletopRef.current ? appRect(tabletopRef.current) : undefined);
     if (!rect) return;
 
-    const clientX = e.clientX;
-    const clientY = e.clientY;
+    const clientX = appPoint(e.clientX, e.clientY).x;
+    const clientY = appPoint(e.clientX, e.clientY).y;
 
     const target = e.target as HTMLElement;
     const isBackground =
@@ -211,7 +213,7 @@ export const Tabletop: React.FC<TabletopProps> = ({
     if (e.button !== 0) return; // Only left click drag
     e.stopPropagation();
 
-    const rect = tabletopRef.current?.getBoundingClientRect();
+    const rect = (tabletopRef.current ? appRect(tabletopRef.current) : undefined);
     if (!rect) return;
 
     const isSelected =
@@ -236,7 +238,7 @@ export const Tabletop: React.FC<TabletopProps> = ({
 
     // Start drag behavior
     setIsDragging(true);
-    setDragStartPointer({ x: e.clientX, y: e.clientY });
+    setDragStartPointer({ x: appPoint(e.clientX, e.clientY).x, y: appPoint(e.clientX, e.clientY).y });
 
     // Store positions for dragged elements
     const initialPositions: Record<string, { x: number; y: number; type: 'card' | 'counter' }> = {};
@@ -272,18 +274,18 @@ export const Tabletop: React.FC<TabletopProps> = ({
 
   // Drag / Pan / Marquee move
   const handlePointerMove = (e: React.PointerEvent) => {
-    const rect = tabletopRef.current?.getBoundingClientRect();
+    const rect = (tabletopRef.current ? appRect(tabletopRef.current) : undefined);
     if (!rect) return;
 
     if (isPanning) {
       setPan({
-        x: e.clientX - panStart.x,
-        y: e.clientY - panStart.y,
+        x: appPoint(e.clientX, e.clientY).x - panStart.x,
+        y: appPoint(e.clientX, e.clientY).y - panStart.y,
       });
     } else if (isDragging) {
       // Divide by zoom so items drag exactly with mouse pointer speed
-      const dx = (e.clientX - dragStartPointer.x) / zoom;
-      const dy = (e.clientY - dragStartPointer.y) / zoom;
+      const dx = (appPoint(e.clientX, e.clientY).x - dragStartPointer.x) / zoom;
+      const dy = (appPoint(e.clientX, e.clientY).y - dragStartPointer.y) / zoom;
 
       const cardUpdates: { id: string; x: number; y: number }[] = [];
       const counterUpdates: { id: string; x: number; y: number }[] = [];
@@ -301,8 +303,8 @@ export const Tabletop: React.FC<TabletopProps> = ({
       if (cardUpdates.length > 0) onUpdateCardPositions(cardUpdates);
       if (counterUpdates.length > 0) onUpdateCounterPositions(counterUpdates);
     } else if (isMarquee) {
-      const boardX = (e.clientX - rect.left - pan.x) / zoom;
-      const boardY = (e.clientY - rect.top - pan.y) / zoom;
+      const boardX = (appPoint(e.clientX, e.clientY).x - rect.left - pan.x) / zoom;
+      const boardY = (appPoint(e.clientX, e.clientY).y - rect.top - pan.y) / zoom;
       setMarqueeCurrent({ x: boardX, y: boardY });
 
       const left = Math.min(marqueeStart.x, boardX);
