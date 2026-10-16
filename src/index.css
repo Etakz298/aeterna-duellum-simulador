@@ -565,3 +565,7 @@ html.rot-landscape #root {
 /* Vista previa tocada a pantalla grande */
 .ol-preview-big { animation: olPreviewBig 0.2s ease-out; }
 @keyframes olPreviewBig { from { transform: scale(0.85); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+
+/* Menú de elegir campeón */
+.ol-champion { transition: transform 0.15s ease; }
+.ol-champion:not(:disabled):hover { transform: translateY(-3px); }
