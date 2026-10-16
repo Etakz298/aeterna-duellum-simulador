@@ -151,6 +151,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
   // ampliada se abre manteniendo el dedo sobre la carta
   const isTouch = useMemo(() => typeof window !== 'undefined' && !!window.matchMedia?.('(pointer: coarse)').matches, []);
   const [pressPreview, setPressPreview] = useState<string | null>(null);
+  const [pickClosed, setPickClosed] = useState(false); // menú de elegir campeón cerrado a mano
   const [previewBig, setPreviewBig] = useState(false); // vista previa tocada: a pantalla grande
   const pressTimer = useRef<number | undefined>(undefined);
   const [selectedHandId, setSelectedHandId] = useState<string | null>(null);
@@ -1178,6 +1179,8 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
   };
 
   const lifeCounter = (side: SideKey) => {
+    // Sin mazo puesto todavía no hay vida que llevar
+    if (!state.players[seatOf(side)]?.deckId) return null;
     const lifeTpl = lifeTemplateOf(side);
     if (lifeTpl) return lifeCard(side, lifeTpl);
     const mine = canControl(side);
@@ -2086,6 +2089,41 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
       )}
 
       {/* Fin de partida: quién ha ganado */}
+      {/* Al entrar en la sala: elegir campeón y queda todo listo para jugar */}
+      {!solo && !myInfo?.deckId && !pickClosed && Object.keys(library.deckNames).length > 0 && (
+        <Overlay onClose={() => setPickClosed(true)}>
+          <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: 4 }}>Elige tu campeón</h3>
+          <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 14 }}>Tu mazo se pondrá barajado y listo para empezar.</p>
+          <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap', maxHeight: compact ? 'calc(var(--app-h, 100vh) - 150px)' : '70vh', overflowY: 'auto' }}>
+            {Object.entries(library.deckNames).map(([id, name]) => {
+              const tpls = library.templates.filter((t) => t.deckId === id);
+              const cover = tpls.find((t) => t.isLife && t.imageUrl) || tpls.find((t) => !t.isLife && t.imageUrl);
+              const count = tpls.filter((t) => !t.isLife).reduce((n, t) => n + (t.quantity || 1), 0);
+              const taken = oppInfo?.deckId === id;
+              return (
+                <button
+                  key={id}
+                  className="btn-secondary ol-champion"
+                  disabled={taken || count === 0}
+                  onClick={() => pickDeck('me', id)}
+                  style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, padding: 8, width: compact ? 120 : 170, opacity: taken || count === 0 ? 0.45 : 1 }}
+                >
+                  {cover?.imageUrl ? (
+                    <img src={cover.imageUrl} alt={name} style={{ width: '100%', aspectRatio: '800 / 1244', objectFit: 'cover', borderRadius: 8 }} />
+                  ) : (
+                    <div style={{ width: '100%', aspectRatio: '800 / 1244', borderRadius: 8, background: 'rgba(255,255,255,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <Layers size={28} />
+                    </div>
+                  )}
+                  <span style={{ fontWeight: 700, fontSize: compact ? 14 : 15 }}>{name}</span>
+                  <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{taken ? 'Lo usa tu rival' : `${count} cartas`}</span>
+                </button>
+              );
+            })}
+          </div>
+        </Overlay>
+      )}
+
       {showEnd && (
         <Overlay onClose={() => setShowEnd(false)}>
           <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: 6 }}>¿Quién ha ganado?</h3>
