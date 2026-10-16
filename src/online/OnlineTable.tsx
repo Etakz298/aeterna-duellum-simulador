@@ -151,6 +151,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
   // ampliada se abre manteniendo el dedo sobre la carta
   const isTouch = useMemo(() => typeof window !== 'undefined' && !!window.matchMedia?.('(pointer: coarse)').matches, []);
   const [pressPreview, setPressPreview] = useState<string | null>(null);
+  const [previewBig, setPreviewBig] = useState(false); // vista previa tocada: a pantalla grande
   const pressTimer = useRef<number | undefined>(undefined);
   const [selectedHandId, setSelectedHandId] = useState<string | null>(null);
   const [selectedTokenId, setSelectedTokenId] = useState<string | null>(null);
@@ -188,6 +189,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
   const hidePressPreview = () => {
     window.clearTimeout(previewTimer.current);
     setPressPreview(null);
+    setPreviewBig(false);
   };
   const clearSelections = () => {
     setSelectedId(null);
@@ -518,12 +520,10 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
     if (src.kind === 'view') return;
     if (!d.moved) {
       // Clic (o toque) sin arrastrar
-      const wasHand = selectedHandId;
       const wasToken = selectedTokenId;
       clearSelections();
       if (src.kind === 'library') draw(src.side);
       else if (src.kind === 'play' && canControl(src.side)) setSelectedId(src.id);
-      else if (src.kind === 'hand') setSelectedHandId(wasHand === src.id ? null : src.id);
       else if (src.kind === 'token') setSelectedTokenId(wasToken === src.id ? null : src.id);
       return;
     }
@@ -1878,11 +1878,35 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
           </div>
         )}
 
-        {/* Vista ampliada de la carta bajo el ratón */}
-        {previewTemplate?.imageUrl && (
+        {/* Vista ampliada de la carta tocada, a pantalla grande para leerla bien; otro toque la cierra */}
+        {previewBig && pressPreview && previewTemplate?.imageUrl && (
+          <div
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={hidePressPreview}
+            style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 700500, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          >
+            <img
+              className="ol-preview-big"
+              src={previewTemplate.imageUrl}
+              alt={previewTemplate.name}
+              style={{ height: 'calc(100% - 16px)', maxWidth: 'calc(100% - 16px)', aspectRatio: `${CARD_W} / ${CARD_H}`, objectFit: 'contain', borderRadius: 16, boxShadow: '0 20px 60px rgba(0,0,0,0.9)' }}
+            />
+          </div>
+        )}
+        {/* Vista ampliada de la carta bajo el ratón (o tocada: un toque en ella la agranda) */}
+        {previewTemplate?.imageUrl && !previewBig && (
           <img
             src={previewTemplate.imageUrl}
             alt={previewTemplate.name}
+            onPointerDown={pressPreview ? (e) => e.stopPropagation() : undefined}
+            onClick={
+              pressPreview
+                ? () => {
+                    window.clearTimeout(previewTimer.current);
+                    setPreviewBig(true);
+                  }
+                : undefined
+            }
             style={{
               position: 'absolute',
               top: 12,
@@ -1892,7 +1916,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
               objectFit: 'cover',
               borderRadius: 14,
               boxShadow: '0 20px 50px rgba(0,0,0,0.8)',
-              pointerEvents: 'none',
+              pointerEvents: pressPreview ? 'auto' : 'none',
               zIndex: 600000,
             }}
           />
