@@ -15,12 +15,18 @@ export const EMOJIS = [
   '💯', '❓', '❗', '😮', '😤', '🤓', '😇', '🐐',
 ];
 
+// Números del 0 al 9 (emojis de tecla)
+export const NUMBER_EMOJIS = ['0️⃣', '1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣'];
+const KEYCAP = /[0-9#*]\ufe0f?\u20e3/gu;
+
 // Mensaje formado solo por emojis (se ve grande, como en WhatsApp)
 export function isEmojiOnly(text: string) {
-  const t = text.trim();
-  if (!t || !/\p{Extended_Pictographic}/u.test(t)) return false;
-  if (!/^(?:\p{Extended_Pictographic}|\p{Emoji_Modifier}|\p{Regional_Indicator}|‍|️|\s)+$/u.test(t)) return false;
-  return [...t.replace(/\s/g, '')].filter((c) => /\p{Extended_Pictographic}/u.test(c)).length <= 6;
+  const keycaps = text.match(KEYCAP)?.length || 0;
+  const t = text.replace(KEYCAP, '').trim();
+  if (!t) return keycaps > 0 && keycaps <= 6;
+  if (!/\p{Extended_Pictographic}/u.test(t)) return false;
+  if (!/^(?:\p{Extended_Pictographic}|\p{Emoji_Modifier}|\p{Regional_Indicator}|\u200d|\ufe0f|\s)+$/u.test(t)) return false;
+  return keycaps + [...t.replace(/\s/g, '')].filter((c) => /\p{Extended_Pictographic}/u.test(c)).length <= 6;
 }
 
 export const EmojiPicker: React.FC<{ onPick: (emoji: string) => void; style?: React.CSSProperties; big?: boolean }> = ({ onPick, style, big }) => (
@@ -29,16 +35,30 @@ export const EmojiPicker: React.FC<{ onPick: (emoji: string) => void; style?: Re
     onPointerDown={(e) => e.stopPropagation()}
     style={{
       display: 'grid',
-      gridTemplateColumns: 'repeat(8, 1fr)',
+      gridTemplateColumns: 'repeat(8, minmax(0, 1fr))',
       gap: 2,
       padding: 8,
       background: 'rgba(18,24,38,0.97)',
       boxShadow: '0 12px 30px rgba(0,0,0,0.55)',
-      maxHeight: 220,
+      maxHeight: 250,
       overflowY: 'auto',
+      overflowX: 'hidden',
       ...style,
     }}
   >
+    <div style={{ gridColumn: '1 / -1', display: 'grid', gridTemplateColumns: 'repeat(10, minmax(0, 1fr))', gap: 0, paddingBottom: 4, marginBottom: 4, borderBottom: '1px solid var(--glass-border)' }}>
+      {NUMBER_EMOJIS.map((e) => (
+        <button
+          key={e}
+          type="button"
+          className="ol-emoji-btn"
+          onClick={() => onPick(e)}
+          style={{ fontSize: big ? 22 : 19, lineHeight: 1, padding: big ? '6px 0' : '5px 0', background: 'transparent', border: 'none', borderRadius: 8, cursor: 'pointer' }}
+        >
+          {e}
+        </button>
+      ))}
+    </div>
     {EMOJIS.map((e) => (
       <button
         key={e}
