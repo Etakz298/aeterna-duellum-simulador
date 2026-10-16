@@ -48,7 +48,7 @@ import {
 import { inviteLink } from './server';
 import { MatchHistory } from './MatchHistory';
 import { IOS_FULLSCREEN_HINT, fullscreenSupported, toggleFullscreen, useIsFullscreen } from '../fullscreen';
-import { appPoint, appRect, isPhone } from '../rotation';
+import { appPoint, appRect } from '../rotation';
 import type { ConnectionStatus } from './useOnlineGame';
 
 interface OnlineTableProps {
@@ -159,7 +159,6 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
   const [selectedHandId, setSelectedHandId] = useState<string | null>(null);
   const [selectedTokenId, setSelectedTokenId] = useState<string | null>(null);
   const [portrait, setPortrait] = useState(false);
-  const phone = useMemo(isPhone, []); // móvil: ventanas como la de elegir campeón en vertical
 
   const areaRef = useRef<HTMLDivElement>(null);
   const boardRef = useRef<HTMLDivElement>(null);
@@ -2179,16 +2178,10 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
       {/* Fin de partida: quién ha ganado */}
       {/* Al entrar en la sala: elegir campeón y queda todo listo para jugar */}
       {!solo && !myInfo?.deckId && !pickClosed && Object.keys(library.deckNames).length > 0 && (
-        <Overlay onClose={() => setPickClosed(true)} portrait={phone}>
+        <Overlay onClose={() => setPickClosed(true)}>
           <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: 4 }}>Elige tu campeón</h3>
           <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 14 }}>Tu mazo se pondrá barajado y listo para empezar.</p>
-          <div
-            style={
-              phone
-                ? { display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }
-                : { display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap', maxHeight: compact ? 'calc(var(--app-h, 100vh) - 150px)' : '70vh', overflowY: 'auto' }
-            }
-          >
+          <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap', maxHeight: compact ? 'calc(var(--app-h, 100vh) - 150px)' : '70vh', overflowY: 'auto' }}>
             {Object.entries(library.deckNames).map(([id, name]) => {
               const tpls = library.templates.filter((t) => t.deckId === id);
               // Reverso del mazo (siempre el tipo A; el B si no hay A)
@@ -2201,7 +2194,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
                   className="btn-secondary ol-champion"
                   disabled={taken || count === 0}
                   onClick={() => pickDeck('me', id)}
-                  style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: phone ? 3 : 6, padding: phone ? 4 : 8, width: phone ? 'auto' : compact ? 112 : 170, minWidth: 0, opacity: taken || count === 0 ? 0.45 : 1 }}
+                  style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, padding: 8, width: compact ? 112 : 170, opacity: taken || count === 0 ? 0.45 : 1 }}
                 >
                   {cover ? (
                     <img src={cover} alt={name} style={{ width: '100%', aspectRatio: `${CARD_W} / ${CARD_H}`, objectFit: 'cover', borderRadius: 8 }} />
@@ -2210,8 +2203,8 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
                       <Layers size={28} />
                     </div>
                   )}
-                  <span style={{ fontWeight: 700, fontSize: phone ? 12 : compact ? 14 : 15, maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</span>
-                  <span style={{ fontSize: phone ? 10 : 12, color: 'var(--text-muted)' }}>{taken ? 'Lo usa tu rival' : `${count} cartas`}</span>
+                  <span style={{ fontWeight: 700, fontSize: compact ? 14 : 15 }}>{name}</span>
+                  <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{taken ? 'Lo usa tu rival' : `${count} cartas`}</span>
                 </button>
               );
             })}
@@ -2366,16 +2359,12 @@ const pill: React.CSSProperties = {
 };
 
 
-// portrait: en el móvil se muestra siempre en vertical, gire como gire el aparato
-// (la aplicación está en horizontal; esta capa se gira -90º para quedar derecha)
-const Overlay: React.FC<{ onClose: () => void; children: React.ReactNode; portrait?: boolean }> = ({ onClose, children, portrait }) => (
+const Overlay: React.FC<{ onClose: () => void; children: React.ReactNode }> = ({ onClose, children }) => (
   <div
     onPointerDown={onClose}
     style={{
       position: 'fixed',
-      ...(portrait
-        ? { top: 0, left: 0, width: 'var(--app-h, 100vh)', height: 'var(--app-w, 100vw)', transformOrigin: 'top left', transform: 'rotate(-90deg) translateX(-100%)' }
-        : { inset: 0 }),
+      inset: 0,
       background: 'rgba(5, 8, 16, 0.75)',
       backdropFilter: 'blur(6px)',
       display: 'flex',
@@ -2387,11 +2376,7 @@ const Overlay: React.FC<{ onClose: () => void; children: React.ReactNode; portra
     <div
       className="glass-panel"
       onPointerDown={(e) => e.stopPropagation()}
-      style={{
-        maxWidth: portrait ? 'calc(var(--app-h, 100vh) - 20px)' : 'min(900px, calc(var(--app-w, 100vw) * 0.94))',
-        maxHeight: portrait ? 'calc(var(--app-w, 100vw) - 40px)' : 'calc(var(--app-h, 100vh) - 16px)',
-        overflowY: 'auto',
-        padding: portrait ? '20px 12px 14px' : '22px 44px', borderRadius: 16, position: 'relative', textAlign: 'center' }}
+      style={{ maxWidth: 'min(900px, calc(var(--app-w, 100vw) * 0.94))', maxHeight: 'calc(var(--app-h, 100vh) - 16px)', overflowY: 'auto', padding: '22px 44px', borderRadius: 16, position: 'relative', textAlign: 'center' }}
     >
       <button className="btn-secondary" onClick={onClose} style={{ position: 'absolute', top: 10, right: 10, padding: 4 }}>
         <X size={14} />
