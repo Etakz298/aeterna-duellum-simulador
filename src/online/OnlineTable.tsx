@@ -39,7 +39,6 @@ import {
   clamp,
   inRect,
   makeLayout,
-  zoneRect as stdZoneRect,
   type Rect,
   type SideKey,
   type ZoneKey,
@@ -464,10 +463,10 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
     patchState((s) => ({ ...s, life: { ...s.life, [side]: v } }));
     sendAs(side, { t: 'life', value: v });
   };
-  const addToken = () => {
-    const r = stdZoneRect('me', 'play');
-    const n = state.tokens.length % 8;
-    send({ t: 'tokenAdd', x: r.x + r.w / 2 - TOKEN_SIZE / 2 + n * 12, y: r.y + 20 + n * 6 });
+  // Enseñar la mano pide confirmación; ocultarla no
+  const toggleHand = () => {
+    if (handRevealed) send({ t: 'showHand', value: false });
+    else confirm('Enseñar tu mano', 'Tu rival verá todas las cartas de tu mano hasta que la vuelvas a ocultar. ¿Seguro?', () => send({ t: 'showHand', value: true }));
   };
 
   // Teclado
@@ -939,7 +938,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
               <button
                 className={handRevealed ? 'btn-primary' : 'btn-secondary'}
                 onPointerDown={(e) => e.stopPropagation()}
-                onClick={() => send({ t: 'showHand', value: !handRevealed })}
+                onClick={toggleHand}
                 title={handRevealed ? 'Volver a ocultar tu mano' : 'Enseñar todas las cartas de tu mano al rival hasta que la vuelvas a ocultar'}
                 style={smallBtn}
               >
@@ -1423,7 +1422,8 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
 
   const handRevealed = !!myInfo?.handRevealed;
   const myCardsInGame = state.me.library.count + state.hand.length + state.me.graveyard.length + state.me.play.length > 0;
-  const unread = showLog ? 0 : Math.max(0, state.log.length - seenLog);
+  // Solo cuentan los mensajes del rival sin leer
+  const unread = showLog ? 0 : state.log.slice(seenLog).filter((e) => e.kind === 'chat' && e.by && e.by !== state.you).length;
   const btn: React.CSSProperties = { padding: ui.pad, fontSize: ui.font };
   // La vista ampliada solo se muestra si la carta sigue donde estaba (y boca arriba)
   const hoverStillThere =
@@ -1449,7 +1449,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
   const deckSelect = (side: SideKey, placeholder: string) => (
     <select
       value={state.players[seatOf(side)]?.deckId || ''}
-      onChange={(e) => sendAs(side, { t: 'chooseDeck', deckId: e.target.value })}
+      onChange={(e) => pickDeck(side, e.target.value)}
       style={{
         flex: 1,
         minWidth: 0,
@@ -1472,12 +1472,16 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
       ))}
     </select>
   );
-  const spawnDeck = (side: SideKey) => {
-    const doSpawn = () => sendAs(side, { t: 'spawnDeck' });
+  // Elegir mazo lo pone ya barajado en la biblioteca
+  const pickDeck = (side: SideKey, deckId: string) => {
+    const go = () => {
+      sendAs(side, { t: 'chooseDeck', deckId });
+      sendAs(side, { t: 'spawnDeck' });
+    };
     const who = solo ? `de ${state.players[seatOf(side)]?.name}` : 'tus';
     if (cardsOf(side) > 0)
-      confirm('Volver a poner el mazo', `Se retirarán todas las cartas ${who} (biblioteca, mano, mesa y cementerio) y el mazo se barajará de nuevo en la biblioteca. ¿Seguro?`, doSpawn);
-    else doSpawn();
+      confirm('Cambiar de mazo', `Se retirarán todas las cartas ${who} (biblioteca, mano, mesa y cementerio) y se pondrá el nuevo mazo barajado. ¿Seguro?`, go);
+    else go();
   };
 
   const soloPanel = (
@@ -1501,7 +1505,6 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
         )}
       </div>
       {(['opp', 'me'] as SideKey[]).map((side) => {
-        const has = !!state.players[seatOf(side)]?.deckId;
         return (
           <div key={side} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             <span style={{ fontSize: isTouch ? 15 : 12, color: 'var(--text-muted)' }}>
@@ -1509,29 +1512,14 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
             </span>
             <div style={{ display: 'flex', gap: 6 }}>
               {deckSelect(side, 'Elige mazo…')}
-              <button
-                className="btn-primary"
-                data-keep
-                disabled={!has}
-                onClick={() => spawnDeck(side)}
-                title="Poner el mazo barajado en su biblioteca"
-                style={{ padding: '6px 9px', opacity: has ? 1 : 0.5 }}
-              >
-                <Layers size={15} />
-              </button>
             </div>
           </div>
         );
       })}
       <div style={{ height: 1, background: 'var(--glass-border)' }} />
-      <div style={{ display: 'flex', gap: 6 }}>
-        <button className="btn-secondary" onClick={addToken} title="Añadir un token a la mesa" style={{ ...btn, flex: 1 }}>
-          <span style={{ width: 13, height: 13, borderRadius: '50%', background: '#facc15', border: '2px solid #000', display: 'inline-block' }} /> Token
-        </button>
-        <button className="btn-secondary" onClick={() => setShowLog((v) => !v)} style={{ ...btn, flex: 1 }}>
-          <MessageSquare size={14} /> Registro
-        </button>
-      </div>
+      <button className="btn-secondary" onClick={() => setShowLog((v) => !v)} style={btn}>
+        <MessageSquare size={14} /> Registro
+      </button>
       <div style={{ display: 'flex', gap: 6 }}>
         <button className="btn-primary" onClick={() => setShowEnd(true)} style={{ ...btn, flex: 1 }} title="Registrar qué campeón ha ganado">
           <Trophy size={14} /> Terminar partida
@@ -1547,13 +1535,6 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
       >
         Reiniciar
       </button>
-      <div style={{ fontSize: isTouch ? 15 : 12, color: 'var(--text-muted)', lineHeight: 1.45 }}>
-        {compact
-          ? 'Mueves las cartas de los dos jugadores. Toca una biblioteca para robar (mantenla pulsada para barajar o mirar). Toca una carta para verla en grande y ver sus acciones; toca un cementerio o una vida para ver las suyas.'
-          : isTouch
-          ? 'Mueves las cartas de los dos jugadores. Toca una carta para verla en grande y ver sus acciones; toca la biblioteca para robar.'
-          : 'Mueves las cartas de los dos jugadores. Clic en la biblioteca o R: robar · H: a la mano · G: al cementerio · T: token en la carta'}
-      </div>
     </div>
   );
 
@@ -1578,38 +1559,17 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
       {compact && (
         <button
           className={handRevealed ? 'btn-primary' : 'btn-secondary'}
-          onClick={() => send({ t: 'showHand', value: !handRevealed })}
+          onClick={toggleHand}
           style={btn}
         >
           {handRevealed ? <EyeOff size={ui.icon} /> : <Eye size={ui.icon} />} {handRevealed ? 'Ocultar mi mano' : 'Enseñar mi mano al rival'}
         </button>
       )}
-      {(['p1', 'p2'] as Seat[]).map((seat) => {
-        const p = state.players[seat];
-        return (
-          <div key={seat} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span
-              style={{
-                width: 9,
-                height: 9,
-                borderRadius: '50%',
-                background: p ? (p.connected ? 'var(--color-success)' : 'var(--color-danger)') : 'var(--text-muted)',
-                flexShrink: 0,
-              }}
-            />
-            <span style={{ flex: 1, color: p ? '#fff' : 'var(--text-muted)' }}>
-              {p ? p.name : 'Esperando rival…'}
-              {seat === me ? ' (tú)' : ''}
-              {p && p.left ? ' · ha salido' : p && !p.connected ? ' · desconectado' : ''}
-            </span>
-          </div>
-        );
-      })}
       <div style={{ height: 1, background: 'var(--glass-border)' }} />
       <div style={{ display: 'flex', gap: 6 }}>
         <select
           value={myInfo?.deckId || ''}
-          onChange={(e) => send({ t: 'chooseDeck', deckId: e.target.value })}
+          onChange={(e) => pickDeck('me', e.target.value)}
           style={{
             flex: 1,
             minWidth: 0,
@@ -1637,23 +1597,6 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
           <RefreshCw size={14} />
         </button>
       </div>
-      <button
-        className="btn-primary"
-        disabled={!myInfo?.deckId}
-        onClick={() => spawnDeck('me')}
-        style={{ ...btn, padding: 10, opacity: myInfo?.deckId ? 1 : 0.5 }}
-      >
-        <Layers size={15} /> Poner mi mazo barajado
-      </button>
-      <div style={{ display: 'flex', gap: 6 }}>
-        <button className="btn-secondary" onClick={addToken} title="Añadir un token a la mesa" style={{ ...btn, flex: 1 }}>
-          <span style={{ width: 13, height: 13, borderRadius: '50%', background: '#facc15', border: '2px solid #000', display: 'inline-block' }} /> Token
-        </button>
-        <button className="btn-secondary" onClick={() => setShowLog((v) => !v)} style={{ ...btn, flex: 1 }}>
-          <MessageSquare size={14} /> Chat
-          {unread > 0 && <span style={{ marginLeft: 2, background: 'var(--color-accent)', borderRadius: 10, padding: '0 6px', fontSize: 12 }}>{unread}</span>}
-        </button>
-      </div>
       <div style={{ display: 'flex', gap: 6 }}>
         <button className="btn-primary" onClick={() => setShowEnd(true)} disabled={!oppInfo} style={{ ...btn, flex: 1, opacity: oppInfo ? 1 : 0.5 }} title="Registrar quién ha ganado">
           <Trophy size={14} /> Terminar partida
@@ -1675,13 +1618,6 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
         <button className="btn-danger" onClick={onLeave} style={{ ...btn, flex: 1 }}>
           <LogOut size={14} /> Salir
         </button>
-      </div>
-      <div style={{ fontSize: isTouch ? 15 : 12, color: 'var(--text-muted)', lineHeight: 1.45 }}>
-        {compact
-          ? 'Arrastra las cartas con el dedo. Toca tu biblioteca para robar (mantenla pulsada para barajar o mirar). Toca una carta para verla en grande y ver sus acciones; toca tu cementerio o tu vida para ver las suyas.'
-          : isTouch
-          ? 'Arrastra las cartas con el dedo. Toca una carta para verla en grande y ver sus acciones; toca la biblioteca para robar.'
-          : 'Arrastra las cartas entre tus franjas. Clic en la biblioteca o R: robar · H: a la mano · G: al cementerio · T: token en la carta'}
       </div>
     </div>
   );
@@ -1876,7 +1812,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
           )}
           {!solo && !myCardsInGame && (
             <div style={{ position: 'absolute', left: SIDE_W, top: zoneRect('me', 'play').y + zoneRect('me', 'play').h * 0.4, width: PLAY_W, textAlign: 'center', color: 'rgba(255,255,255,0.4)', fontSize: 22, pointerEvents: 'none' }}>
-              {myInfo?.deckId ? 'Pulsa "Poner mi mazo barajado" para empezar' : 'Elige tu mazo en el panel de la sala y pulsa "Poner mi mazo barajado"'}
+              {compact ? 'Elige tu mazo en el menú para empezar' : 'Elige tu mazo en el panel de la sala para empezar'}
             </div>
           )}
         </div>
@@ -2026,14 +1962,32 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
           </div>
         )}
 
-        {/* Avisos de chat del rival: entran por la derecha y se van solos */}
+        {/* Botón de chat siempre a mano arriba a la derecha */}
+        {!solo && !showLog && (
+          <button
+            className="btn-secondary"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={() => setShowLog(true)}
+            title="Abrir el chat"
+            style={{ position: 'absolute', top: compact ? 8 : 12, right: compact ? 8 : 12, zIndex: 650000, padding: compact ? 9 : '8px 12px', background: 'rgba(18,24,38,0.92)', display: 'flex', alignItems: 'center', gap: 6 }}
+          >
+            <MessageSquare size={compact ? 20 : 16} />
+            {!compact && 'Chat'}
+            {unread > 0 && <span style={{ background: 'var(--color-accent)', borderRadius: 10, padding: '0 6px', fontSize: 12, color: '#fff' }}>{unread}</span>}
+          </button>
+        )}
+
+        {/* Avisos de chat del rival: entran por la derecha y se van solos; al pulsarlos se abre el chat */}
         {chatToasts.length > 0 && (
-          <div style={{ position: 'absolute', right: 12, top: compact ? 64 : 90, display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-end', zIndex: 760000, pointerEvents: 'none' }}>
+          <div style={{ position: 'absolute', right: 12, top: compact ? 60 : 64, display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-end', zIndex: 760000, pointerEvents: 'none' }}>
             {chatToasts.map((t) => (
               <div
                 key={t.id}
                 className={`glass-panel ol-chat-toast${t.leaving ? ' ol-chat-toast-out' : ''}`}
-                style={{ maxWidth: compact ? 260 : 340, padding: '10px 14px', fontSize: compact ? 14 : 15, display: 'flex', gap: 8, alignItems: 'flex-start', boxShadow: '0 10px 30px rgba(0,0,0,0.5)' }}
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={() => setShowLog(true)}
+                title="Abrir el chat"
+                style={{ pointerEvents: 'auto', cursor: 'pointer', maxWidth: compact ? 260 : 340, padding: '10px 14px', fontSize: compact ? 14 : 15, display: 'flex', gap: 8, alignItems: 'flex-start', boxShadow: '0 10px 30px rgba(0,0,0,0.5)' }}
               >
                 <MessageSquare size={16} style={{ flexShrink: 0, marginTop: 2, color: 'var(--color-accent)' }} />
                 <span style={{ wordBreak: 'break-word' }}>{t.text}</span>
