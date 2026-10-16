@@ -4,6 +4,7 @@ import { IOS_FULLSCREEN_HINT, fullscreenSupported, toggleFullscreen, useIsFullsc
 import type { CardTemplate } from '../types';
 import type { PeekResult, Seat, ServerLibrary, StateEffects } from './types';
 import { OnlineTable } from './OnlineTable';
+import { setRotationAllowed } from '../rotation';
 import { MatchHistory } from './MatchHistory';
 import { loadStoredSession, useOnlineGame } from './useOnlineGame';
 import {
@@ -68,6 +69,11 @@ export const OnlineMode: React.FC<OnlineModeProps> = ({ initialCode, localLibrar
   });
 
   youRef.current = game.state?.you;
+
+  // En el móvil, la sala online se ve en vertical; solo la mesa de juego se gira
+  const inTable = !!game.state;
+  useEffect(() => setRotationAllowed(inTable), [inTable]);
+  useEffect(() => () => setRotationAllowed(true), []);
 
   const loadLibrary = useCallback(
     async (url: string) => {

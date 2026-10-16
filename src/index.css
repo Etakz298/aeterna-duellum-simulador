@@ -569,3 +569,7 @@ html.rot-landscape #root {
 /* Menú de elegir campeón */
 .ol-champion { transition: transform 0.15s ease; }
 .ol-champion:not(:disabled):hover { transform: translateY(-3px); }
+
+/* Flecha de quién empieza: sube y baja suavemente */
+.ol-starter-arrow { animation: olStarterBob 1s ease-in-out infinite; }
+@keyframes olStarterBob { 0%, 100% { transform: translateY(-3px); } 50% { transform: translateY(3px); } }
