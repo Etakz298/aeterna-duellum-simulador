@@ -53,7 +53,7 @@ interface SidebarProps {
   onCreateDeck: () => void; // Dynamically create deck
   onDeleteDeck: (id: string) => void; // Dynamically delete deck
   onAddTemplates: (
-    templatesData: { name: string; blob: Blob; deckId: string; backType: 'backA' | 'backB'; quantity?: number }[]
+    templatesData: { name: string; blob: Blob; deckId: string; backType: 'backA' | 'backB'; quantity?: number; isSpecial?: boolean; isLife?: boolean }[]
   ) => Promise<void>;
   onDeleteTemplate: (id: string) => Promise<void>;
   onUpdateTemplateDeck: (id: string, deckId: string) => void;
@@ -114,7 +114,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [expandedDecks, setExpandedDecks] = useState<Record<string, boolean>>({});
 
   // Batch import states
-  const [pendingBatch, setPendingBatch] = useState<Array<{ name: string; file: File | Blob; previewUrl: string; quantity: number }>>([]);
+  const [pendingBatch, setPendingBatch] = useState<Array<{ name: string; file: File | Blob; previewUrl: string; quantity: number; isSpecial?: boolean; isLife?: boolean }>>([]);
   const [batchDeckId, setBatchDeckId] = useState('mazo1');
   const [batchBackType, setBatchBackType] = useState<'backA' | 'backB'>('backA');
   const [batchDragOver, setBatchDragOver] = useState(false);
@@ -246,6 +246,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
       deckId: batchDeckId,
       backType: batchBackType,
       quantity: item.quantity,
+      isSpecial: !!item.isSpecial,
+      isLife: !!item.isLife,
     }));
 
     await onAddTemplates(data);
@@ -558,6 +560,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       }}
                       style={{
                         flex: 1,
+                        minWidth: 0,
                         background: 'transparent',
                         border: 'none',
                         borderBottom: '1px solid transparent',
@@ -583,6 +586,40 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         x{item.quantity}
                       </span>
                     )}
+                    {/* Especial (siempre arriba) y Vida (contador de vida), como en la lista del mazo */}
+                    <button
+                      title="Especial: al poner el mazo en la mesa o barajarlo, esta carta queda siempre arriba"
+                      onClick={() =>
+                        setPendingBatch((prev) => prev.map((it, i) => (i === idx ? { ...it, isSpecial: !it.isSpecial } : it)))
+                      }
+                      style={{
+                        padding: '1px 5px',
+                        fontSize: '0.65rem',
+                        borderRadius: '4px',
+                        border: `1px solid ${item.isSpecial ? '#facc15' : 'var(--glass-border)'}`,
+                        background: item.isSpecial ? 'rgba(250, 204, 21, 0.2)' : 'transparent',
+                        color: item.isSpecial ? '#facc15' : 'var(--text-muted)',
+                      }}
+                    >
+                      ★
+                    </button>
+                    <button
+                      title="Carta de vida (de 10 a 0): se usa como contador de vida y no entra en la biblioteca"
+                      onClick={() =>
+                        // Solo una carta de vida por mazo
+                        setPendingBatch((prev) => prev.map((it, i) => ({ ...it, isLife: i === idx ? !it.isLife : false })))
+                      }
+                      style={{
+                        padding: '1px 5px',
+                        fontSize: '0.65rem',
+                        borderRadius: '4px',
+                        border: `1px solid ${item.isLife ? '#f87171' : 'var(--glass-border)'}`,
+                        background: item.isLife ? 'rgba(248, 113, 113, 0.2)' : 'transparent',
+                        color: item.isLife ? '#f87171' : 'var(--text-muted)',
+                      }}
+                    >
+                      ♥
+                    </button>
                     <button
                       onClick={() => handleRemoveBatchItem(idx)}
                       style={{
@@ -1006,7 +1043,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                   B
                                 </button>
                               </div>
+                            </div>
 
+                            {/* Especial (siempre arriba del mazo) y Vida (contador de vida), en su propia fila */}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginTop: '6px', flexWrap: 'wrap' }}>
                               {/* Carta especial: siempre en la parte superior del mazo */}
                               <button
                                 onClick={() => onUpdateTemplateSpecial(template.id, !template.isSpecial)}
