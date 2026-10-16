@@ -172,7 +172,7 @@ export class Game {
       life: { me: this.life[seat], opp: this.life[opp] },
       // Los tokens se guardan vistos por p1; a p2 se le dan girados 180º
       tokens: this.tokens.map((t) =>
-        seat === 'p1' ? t : { id: t.id, x: BOARD_W - TOKEN_SIZE - t.x, y: BOARD_H - TOKEN_SIZE - t.y },
+        t.cardId || seat === 'p1' ? t : { id: t.id, x: BOARD_W - TOKEN_SIZE - t.x, y: BOARD_H - TOKEN_SIZE - t.y },
       ),
       log: this.log,
     };
@@ -192,6 +192,8 @@ export class Game {
   act_chooseDeck(seat, msg, library) {
     const deckId = String(msg.deckId || '');
     if (!library.deckNames[deckId]) throw new Error('Ese mazo no existe en el servidor');
+    // En 1 vs 1 cada jugador usa un mazo distinto
+    if (!this.free && this.players[other(seat)]?.deckId === deckId) throw new Error('Tu rival ya ha elegido ese mazo: elige otro');
     this.players[seat].deckId = deckId;
     this.addLog(`${this.nameOf(seat)} ha elegido el mazo "${library.deckNames[deckId]}".`);
   }
@@ -204,6 +206,7 @@ export class Game {
     if (templates.length === 0) throw new Error('El mazo elegido está vacío');
 
     for (const c of [...this.cards.values()]) if (c.owner === seat) this.cards.delete(c.id);
+    this.tokens = this.tokens.filter((t) => !t.cardId || this.cards.has(t.cardId));
 
     let n = 0;
     for (const t of templates) {
@@ -250,8 +253,19 @@ export class Game {
     if (n) this.addLog(`${this.nameOf(seat)} ha barajado su biblioteca.`);
   }
 
+  // Devuelve el cementerio a la biblioteca, barajado
+  act_recycleGraveyard(seat) {
+    const list = this.zoneCards(seat, 'graveyard');
+    if (list.length === 0) throw new Error('El cementerio está vacío');
+    for (const c of list) this.place(c, seat, 'library');
+    this.shuffleLibrary(seat);
+    this.addLog(`${this.nameOf(seat)} ha barajado su cementerio en la biblioteca (${list.length} cartas).`);
+  }
+
   // Coloca una carta en una zona del jugador `side`
   place(card, side, zone, opts = {}) {
+    const wasInPlay = card.zone === 'play';
+    const oldId = card.id;
     card.side = side;
     card.zone = zone;
     card.order = this.nextOrder();
@@ -269,6 +283,11 @@ export class Game {
       if (opts.resetRotation) card.rotation = 0;
     }
     this.reId(card);
+    // Los tokens puestos en la carta la siguen en juego y desaparecen si sale de la mesa
+    if (wasInPlay) {
+      if (zone === 'play') for (const t of this.tokens) if (t.cardId === oldId) t.cardId = card.id;
+      this.tokens = this.tokens.filter((t) => t.cardId !== oldId);
+    }
     return card;
   }
 
@@ -403,6 +422,15 @@ export class Game {
 
   act_tokenAdd(seat, msg) {
     if (this.tokens.length >= 60) throw new Error('Hay demasiados tokens en la mesa');
+    if (msg.cardId) {
+      // Token fijado a una carta en juego
+      const card = this.cards.get(msg.cardId);
+      if (!card || card.zone !== 'play') throw new Error('Esa carta ya no está en juego');
+      if (this.tokens.filter((t) => t.cardId === card.id).length >= 6) throw new Error('Esa carta ya tiene muchos tokens');
+      this.tokens.push({ id: randomId('token'), cardId: card.id });
+      this.addLog(`${this.nameOf(seat)} ha puesto un token en una carta.`);
+      return;
+    }
     const x = isNum(msg.x) ? msg.x : BOARD_W / 2 - TOKEN_SIZE / 2;
     const y = isNum(msg.y) ? msg.y : 600;
     const token = { id: randomId('token'), ...this.toP1(seat, x, y) };
@@ -412,7 +440,7 @@ export class Game {
 
   act_tokenMove(seat, msg) {
     const t = this.tokens.find((k) => k.id === msg.id);
-    if (!t || !isNum(msg.x) || !isNum(msg.y)) return;
+    if (!t || t.cardId || !isNum(msg.x) || !isNum(msg.y)) return;
     Object.assign(t, this.toP1(seat, msg.x, msg.y));
   }
 

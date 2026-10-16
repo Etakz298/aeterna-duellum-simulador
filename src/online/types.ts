@@ -52,8 +52,9 @@ export interface LogEntry {
 
 export interface OnlineToken {
   id: string;
-  x: number;
-  y: number;
+  x?: number;
+  y?: number;
+  cardId?: string; // token fijado a una carta en juego
 }
 
 export interface OnlineState {
