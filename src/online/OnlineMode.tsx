@@ -109,11 +109,19 @@ export const OnlineMode: React.FC<OnlineModeProps> = ({ initialCode, localLibrar
     return n;
   };
 
-  const handleCreate = () => game.connect(serverUrl, { t: 'create', name: rememberName() });
+  // El nombre se pide justo al crear la sala o al unirse
+  const [askName, setAskName] = useState<'create' | 'join' | null>(null);
+  const handleCreate = () => setAskName('create');
   const handleJoin = () => {
     const c = code.trim().toUpperCase();
     if (!c) return toast('Escribe el código de la sala');
-    game.connect(serverUrl, { t: 'join', code: c, name: rememberName() });
+    setAskName('join');
+  };
+  const confirmName = () => {
+    const n = rememberName();
+    if (askName === 'create') game.connect(serverUrl, { t: 'create', name: n });
+    else if (askName === 'join') game.connect(serverUrl, { t: 'join', code: code.trim().toUpperCase(), name: n });
+    setAskName(null);
   };
 
   const handleLeave = () => {
@@ -289,11 +297,6 @@ export const OnlineMode: React.FC<OnlineModeProps> = ({ initialCode, localLibrar
                 : 'El servidor todavía no tiene mazos publicados.'}
         </div>
 
-        <div>
-          <label style={label}>Tu nombre</label>
-          <input style={inputStyle} value={name} maxLength={20} placeholder="Nombre que verá tu rival" onChange={(e) => setName(e.target.value)} />
-        </div>
-
         <button className="btn-primary" disabled={busy || !serverUrl || !!libraryError} onClick={handleCreate} style={{ padding: 12, fontSize: '0.95rem' }}>
           <Plus size={16} /> Crear sala nueva
         </button>
@@ -375,6 +378,33 @@ export const OnlineMode: React.FC<OnlineModeProps> = ({ initialCode, localLibrar
           <ArrowLeft size={14} /> Volver al modo un jugador
         </button>
       </div>
+      {askName && (
+        <div
+          onPointerDown={() => setAskName(null)}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(5, 8, 16, 0.75)', backdropFilter: 'blur(6px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 900000 }}
+        >
+          <form
+            className="glass-panel"
+            onPointerDown={(e) => e.stopPropagation()}
+            onSubmit={(e) => {
+              e.preventDefault();
+              confirmName();
+            }}
+            style={{ width: 'min(360px, 90vw)', padding: 22, display: 'flex', flexDirection: 'column', gap: 12 }}
+          >
+            <h3 style={{ fontSize: '1.05rem', fontWeight: 700 }}>¿Cómo te llamas?</h3>
+            <input autoFocus style={inputStyle} value={name} maxLength={20} placeholder="Nombre que verá tu rival" onChange={(e) => setName(e.target.value)} />
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button type="button" className="btn-secondary" onClick={() => setAskName(null)} style={{ flex: 1, padding: 10 }}>
+                Cancelar
+              </button>
+              <button type="submit" className="btn-primary" style={{ flex: 1, padding: 10 }}>
+                {askName === 'create' ? <><Plus size={15} /> Crear sala</> : <><LogIn size={15} /> Unirse</>}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
       {toastMsg && <Toast message={toastMsg} />}
       {showHistory && <MatchHistory serverUrl={serverUrl} onClose={() => setShowHistory(false)} />}
     </div>

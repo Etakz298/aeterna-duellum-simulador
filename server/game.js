@@ -61,6 +61,8 @@ export class Game {
     this.cards = new Map();
     this.life = { p1: LIFE_START, p2: LIFE_START };
     this.tokens = []; // { id, x, y } en coordenadas del tablero vistas por p1
+    // Quién juega el primer turno: al azar al crear la sala; cambia al terminar una partida
+    this.starter = webcrypto.getRandomValues(new Uint8Array(1))[0] % 2 ? 'p2' : 'p1';
     this.seq = 0;
     this.log = [];
     this.rev = 0;
@@ -162,6 +164,7 @@ export class Game {
       you: seat,
       rev: this.rev,
       players,
+      starter: this.starter,
       me: sideView(seat),
       opp: sideView(opp),
       hand: this.zoneCards(seat, 'hand').map((c) => ({ id: c.id, templateId: c.templateId, deckId: c.deckId, backType: c.backType })),
@@ -481,6 +484,8 @@ export class Game {
       winner === 'draw' ? `${this.nameOf(seat)} ha terminado la partida: empate.` : `${this.nameOf(seat)} ha terminado la partida: gana ${this.nameOf(winner)}.`,
       'reveal',
     );
+    // La siguiente partida la empieza el otro jugador
+    this.starter = other(this.starter || 'p1');
     if (msg.reset) this.act_reset(seat);
     return { result, fx: { matchEnded: result } };
   }
@@ -491,6 +496,12 @@ export class Game {
     this.tokens = [];
     this.life = { p1: LIFE_START, p2: LIFE_START };
     this.addLog(`${this.nameOf(seat)} ha reiniciado la mesa (sin cartas ni tokens, vidas a ${LIFE_START}).`);
+  }
+
+  // Los jugadores pueden decidir entre ellos quién empieza
+  act_toggleStarter(seat) {
+    this.starter = other(this.starter || 'p1');
+    this.addLog(`${this.nameOf(seat)} ha cambiado quién empieza: empieza ${this.nameOf(this.starter)}.`);
   }
 
   act_chat(seat, msg) {
