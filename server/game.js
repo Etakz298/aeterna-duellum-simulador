@@ -147,12 +147,13 @@ export class Game {
       const top = library[library.length - 1];
       const hand = this.zoneCards(side, 'hand');
       return {
-        library: { count: library.length, top: top ? { deckId: top.deckId, backType: top.backType } : null },
-        // El cementerio está boca abajo: solo se envía el reverso
-        graveyard: this.zoneCards(side, 'graveyard').map((c) => ({ id: c.id, deckId: c.deckId, backType: c.backType })),
+        // La carta Especial (guía de habilidades) la pueden ver los dos jugadores esté donde esté
+        library: { count: library.length, top: top ? { deckId: top.deckId, backType: top.backType, ...(top.isSpecial ? { templateId: top.templateId } : {}) } : null },
+        // El cementerio está boca abajo: solo se envía el reverso (salvo la Especial)
+        graveyard: this.zoneCards(side, 'graveyard').map((c) => ({ id: c.id, deckId: c.deckId, backType: c.backType, ...(c.isSpecial ? { templateId: c.templateId } : {}) })),
         play: this.zoneCards(side, 'play').map((c) => {
           const v = { id: c.id, owner: c.owner, deckId: c.deckId, backType: c.backType, x: c.x, y: c.y, isFaceUp: c.isFaceUp, rotation: c.rotation, order: c.order };
-          if (c.isFaceUp) v.templateId = c.templateId;
+          if (c.isFaceUp || c.isSpecial) v.templateId = c.templateId;
           return v;
         }),
         handCount: hand.length,
@@ -182,7 +183,7 @@ export class Game {
       hand: this.zoneCards(seat, 'hand').map((c) => ({ id: c.id, templateId: c.templateId, deckId: c.deckId, backType: c.backType })),
       // La mano del rival solo se ve si él ha decidido enseñarla
       oppHand: this.zoneCards(opp, 'hand').map((c) =>
-        this.players[opp]?.handRevealed ? { deckId: c.deckId, backType: c.backType, templateId: c.templateId } : { deckId: c.deckId, backType: c.backType },
+        this.players[opp]?.handRevealed || c.isSpecial ? { deckId: c.deckId, backType: c.backType, templateId: c.templateId } : { deckId: c.deckId, backType: c.backType },
       ),
       life: { me: this.life[seat], opp: this.life[opp] },
       // Los tokens se guardan vistos por p1; a p2 se le dan girados 180º
@@ -224,15 +225,18 @@ export class Game {
     this.tokens = this.tokens.filter((t) => !t.cardId || this.cards.has(t.cardId));
 
     let n = 0;
+    // Solo una carta Especial por mazo y una sola copia: es la guía de habilidades
+    const special = templates.find((t) => t.isSpecial);
     for (const t of templates) {
-      const qty = clamp(Number(t.quantity) || 1, 1, 60);
+      const isSpecial = t === special;
+      const qty = isSpecial ? 1 : clamp(Number(t.quantity) || 1, 1, 60);
       for (let i = 0; i < qty; i++) {
         const card = {
           id: randomId('card'),
           templateId: t.id,
           deckId: t.deckId,
           backType: t.backType === 'backB' ? 'backB' : 'backA',
-          isSpecial: !!t.isSpecial,
+          isSpecial,
           owner: seat,
           side: seat,
           zone: 'library',
@@ -296,6 +300,7 @@ export class Game {
       card.x = clamp(isNum(opts.x) ? opts.x : (PLAY_W - CARD_W) / 2, 0, PLAY_W - CARD_W);
       card.y = clamp(isNum(opts.y) ? opts.y : (PLAY_H - CARD_H) / 2, 0, PLAY_H - CARD_H);
       if (typeof opts.faceUp === 'boolean') card.isFaceUp = opts.faceUp;
+      if (card.isSpecial) card.isFaceUp = true; // la Especial siempre boca arriba
       if (opts.resetRotation) card.rotation = 0;
     }
     this.reId(card);
@@ -385,6 +390,7 @@ export class Game {
   act_flip(seat, msg, library) {
     const c = this.cards.get(msg.id);
     if (!c || c.zone !== 'play' || c.side !== seat) throw new Error('Solo puedes voltear cartas de tu zona de juego');
+    if (c.isSpecial) throw new Error('La carta Especial siempre está boca arriba');
     c.isFaceUp = !c.isFaceUp;
     const name = this.cardLabel({ ...c, isFaceUp: true }, library);
     this.addLog(c.isFaceUp ? `${this.nameOf(seat)} ha revelado ${name}.` : `${this.nameOf(seat)} ha puesto ${name} boca abajo.`);

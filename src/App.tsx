@@ -473,12 +473,15 @@ export default function App() {
       newTemplates.push(template);
     }
 
-    // Solo una carta de vida por mazo: la nueva sustituye a la anterior
+    // Solo una carta de vida y una Especial por mazo: la nueva sustituye a la anterior
     const lifeDecks = new Set(newTemplates.filter((t) => t.isLife).map((t) => t.deckId));
+    const specialDecks = new Set(newTemplates.filter((t) => t.isSpecial).map((t) => t.deckId));
     setTemplates((prev) => [
       ...prev.map((t) => {
-        if (!t.isLife || !lifeDecks.has(t.deckId)) return t;
-        const updated = { ...t, isLife: false };
+        const dropLife = t.isLife && lifeDecks.has(t.deckId);
+        const dropSpecial = t.isSpecial && specialDecks.has(t.deckId);
+        if (!dropLife && !dropSpecial) return t;
+        const updated = { ...t, isLife: dropLife ? false : t.isLife, isSpecial: dropSpecial ? false : t.isSpecial };
         saveCardTemplate(updated);
         return updated;
       }),
@@ -557,16 +560,16 @@ export default function App() {
     );
   };
 
-  // Mark/unmark a template as special (always on top of the deck)
+  // Marcar la carta Especial de un mazo (la guía de habilidades): solo una por mazo
   const handleUpdateTemplateSpecial = async (id: string, isSpecial: boolean) => {
+    const deckId = templates.find((t) => t.id === id)?.deckId;
     setTemplates((prev) =>
       prev.map((t) => {
-        if (t.id === id) {
-          const updated = { ...t, isSpecial };
-          saveCardTemplate(updated); // Sync back to storage
-          return updated;
-        }
-        return t;
+        const value = t.id === id ? isSpecial : t.deckId === deckId && isSpecial ? false : !!t.isSpecial;
+        if (value === !!t.isSpecial) return t;
+        const updated = { ...t, isSpecial: value };
+        saveCardTemplate(updated);
+        return updated;
       })
     );
   };
