@@ -202,7 +202,8 @@ export class Game {
   act_spawnDeck(seat, _msg, library) {
     const deckId = this.players[seat].deckId;
     if (!deckId) throw new Error('Elige primero un mazo');
-    const templates = library.templates.filter((t) => t.deckId === deckId);
+    // La carta de vida no entra en la biblioteca: es el contador de vida
+    const templates = library.templates.filter((t) => t.deckId === deckId && !t.isLife);
     if (templates.length === 0) throw new Error('El mazo elegido está vacío');
 
     for (const c of [...this.cards.values()]) if (c.owner === seat) this.cards.delete(c.id);

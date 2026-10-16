@@ -364,6 +364,7 @@ export default function App() {
             backType: t.backType,
             quantity: t.quantity,
             isSpecial: !!t.isSpecial,
+            isLife: !!t.isLife,
             createdAt: t.createdAt || Date.now(),
           };
           await saveCardTemplate(template);
@@ -558,6 +559,20 @@ export default function App() {
     );
   };
 
+  // Marcar la carta de vida de un mazo (solo una por mazo)
+  const handleUpdateTemplateLife = async (id: string, isLife: boolean) => {
+    const deckId = templates.find((t) => t.id === id)?.deckId;
+    setTemplates((prev) =>
+      prev.map((t) => {
+        const value = t.id === id ? isLife : t.deckId === deckId && isLife ? false : !!t.isLife;
+        if (value === !!t.isLife) return t;
+        const updated = { ...t, isLife: value };
+        saveCardTemplate(updated);
+        return updated;
+      })
+    );
+  };
+
   const isSpecialTemplate = (templateId: string) =>
     !!templates.find((t) => t.id === templateId)?.isSpecial;
 
@@ -599,7 +614,8 @@ export default function App() {
     const spawnY = 250 + Math.random() * 20;
 
     // Special cards are added last so they end up on top of the pile
-    const ordered = [...deckTemplates.filter((t) => !t.isSpecial), ...deckTemplates.filter((t) => t.isSpecial)];
+    const inLibrary = deckTemplates.filter((t) => !t.isLife);
+    const ordered = [...inLibrary.filter((t) => !t.isSpecial), ...inLibrary.filter((t) => t.isSpecial)];
     ordered.forEach((template) => {
       const quantity = template.quantity || 1;
       for (let i = 0; i < quantity; i++) {
@@ -867,6 +883,7 @@ export default function App() {
         onUpdateTemplateBackType={handleUpdateTemplateBackType}
         onUpdateTemplateQuantity={handleUpdateTemplateQuantity}
         onUpdateTemplateSpecial={handleUpdateTemplateSpecial}
+        onUpdateTemplateLife={handleUpdateTemplateLife}
         onAddCardsToBoard={handleAddCardsToBoard}
         onAddDeckToBoard={handleAddDeckToBoard}
         onAddCounter={handleAddCounter}
