@@ -1710,7 +1710,6 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
         boxShadow: '0 10px 30px rgba(0,0,0,0.6)',
       }}
     >
-      <span style={{ fontWeight: 600, color: 'var(--text-muted)' }}>Carta:</span>
       <button className="btn-secondary" onClick={tokenOnCard} title="Poner un token en esta carta (T)" style={btn}>
         <span style={tokenDot} /> Token
       </button>
@@ -1878,7 +1877,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
             </div>
           )}
           {/* Quién empieza el primer turno; pulsarlo cambia al otro jugador */}
-          {!solo && state.starter && oppInfo && (() => {
+          {!solo && state.starter && oppInfo && state.me.play.length + state.opp.play.length === 0 && (() => {
             const mine = state.starter === me;
             const top = (zoneRect('opp', 'play').y + zoneRect('opp', 'play').h + zoneRect('me', 'play').y) / 2;
             return (
@@ -1896,13 +1895,17 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
                   padding: compact ? '8px 16px' : '6px 14px',
                   fontSize: compact ? 22 : 15,
                   background: 'rgba(18,24,38,0.92)',
-                  border: '1px solid var(--color-accent)',
+                  border: '2px solid #ef4444',
+                  boxShadow: '0 0 18px rgba(239,68,68,0.45)',
+                  fontWeight: 700,
                   display: 'flex',
                   alignItems: 'center',
                   gap: 6,
                 }}
               >
-                {mine ? <ArrowDown size={compact ? 24 : 16} /> : <ArrowUp size={compact ? 24 : 16} />}
+                <span className="ol-starter-arrow" style={{ display: 'flex', color: '#ef4444' }}>
+                  {mine ? <ArrowDown size={compact ? 30 : 20} strokeWidth={3} /> : <ArrowUp size={compact ? 30 : 20} strokeWidth={3} />}
+                </span>
                 {mine ? 'Empiezas tú' : `Empieza ${oppInfo.name}`}
               </button>
             );
@@ -2201,7 +2204,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
                   className="btn-secondary ol-champion"
                   disabled={taken || count === 0}
                   onClick={() => pickDeck('me', id)}
-                  style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, padding: 8, width: compact ? 120 : 170, opacity: taken || count === 0 ? 0.45 : 1 }}
+                  style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, padding: 8, width: compact ? 112 : 170, opacity: taken || count === 0 ? 0.45 : 1 }}
                 >
                   {cover ? (
                     <img src={cover} alt={name} style={{ width: '100%', aspectRatio: `${CARD_W} / ${CARD_H}`, objectFit: 'cover', borderRadius: 8 }} />
@@ -2383,7 +2386,7 @@ const Overlay: React.FC<{ onClose: () => void; children: React.ReactNode }> = ({
     <div
       className="glass-panel"
       onPointerDown={(e) => e.stopPropagation()}
-      style={{ maxWidth: 'min(900px, 92vw)', padding: '22px 44px', borderRadius: 16, position: 'relative', textAlign: 'center' }}
+      style={{ maxWidth: 'min(900px, calc(var(--app-w, 100vw) * 0.94))', maxHeight: 'calc(var(--app-h, 100vh) - 16px)', overflowY: 'auto', padding: '22px 44px', borderRadius: 16, position: 'relative', textAlign: 'center' }}
     >
       <button className="btn-secondary" onClick={onClose} style={{ position: 'absolute', top: 10, right: 10, padding: 4 }}>
         <X size={14} />

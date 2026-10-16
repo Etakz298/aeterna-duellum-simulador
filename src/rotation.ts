@@ -18,12 +18,20 @@ const devicePortrait = () => {
 };
 
 let rotated = false;
+let allowed = true; // los menús previos (sala online) se quedan en vertical
 export const isRotated = () => rotated;
+
+/** Permite o no girar la aplicación (solo se gira en la mesa de juego). */
+export function setRotationAllowed(value: boolean) {
+  if (allowed === value) return;
+  allowed = value;
+  applyOrientation();
+}
 
 /** Ajusta el giro y el alto visible; se llama al cargar y al cambiar el tamaño. */
 export function applyOrientation() {
   const root = document.documentElement;
-  rotated = isPhone() && devicePortrait() && window.innerHeight > window.innerWidth;
+  rotated = allowed && isPhone() && devicePortrait() && window.innerHeight > window.innerWidth;
   root.classList.toggle('rot-landscape', rotated);
   root.style.setProperty('--app-w', `${rotated ? window.innerHeight : window.innerWidth}px`);
   root.style.setProperty('--app-h', `${rotated ? window.innerWidth : window.innerHeight}px`);
