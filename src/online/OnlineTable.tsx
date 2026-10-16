@@ -15,9 +15,6 @@ import {
   LogOut,
   MessageSquare,
   RefreshCw,
-  RotateCcw,
-  RotateCw,
-  Search,
   Shuffle,
   Trophy,
   X,
@@ -166,7 +163,6 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
   const L = useMemo(() => makeLayout(compact), [compact]);
   const zoneRect = L.zoneRect;
   const [menuOpen, setMenuOpen] = useState(false);
-  const [pileSel, setPileSel] = useState<{ side: SideKey; zone: 'library' | 'graveyard' } | null>(null);
   const [lifeSel, setLifeSel] = useState<SideKey | null>(null);
   const fullscreen = useIsFullscreen();
   const ui = compact
@@ -174,7 +170,6 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
     : isTouch
       ? { font: 19, pad: '10px 12px', icon: 20, pile: 56, life: 52 }
       : { font: 14, pad: '7px 10px', icon: 14, pile: 40, life: 36 };
-  const pileBtn: React.CSSProperties = { padding: 6, width: ui.pile, height: ui.pile, justifyContent: 'center' };
   const smallBtn: React.CSSProperties = isTouch ? { padding: '6px 12px', fontSize: 16 } : { padding: '3px 10px', fontSize: 13 };
   // Con el dedo, tocar una carta la muestra en grande unos segundos
   const previewTimer = useRef<number | undefined>(undefined);
@@ -186,7 +181,6 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
     setSelectedId(null);
     setSelectedHandId(null);
     setSelectedTokenId(null);
-    setPileSel(null);
     setLifeSel(null);
   };
   const onFullscreen = async () => {
@@ -230,7 +224,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
   // cada carta antes y dónde está ahora; si cambió de zona (otro elemento), la
   // nueva se anima desde la posición anterior. Las que desaparecen hacia la
   // biblioteca o la mano oculta del rival vuelan hasta allí.
-  const lastDrop = useRef<{ id?: string; lib?: SideKey; x: number; y: number; at: number } | null>(null);
+  const lastDrop = useRef<{ id?: string; lib?: SideKey; x: number; y: number; w: number; at: number } | null>(null);
   const flipPrev = useRef<{
     pos: Map<string, { x: number; y: number; w: number; el: HTMLElement; side: SideKey; zone: string }>;
     ids: Set<string>;
@@ -280,15 +274,24 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
     if (appeared.length === 1 && vanished.length === 1) pairs.set(appeared[0][0], vanished[0][0]);
     const paired = new Set(pairs.values());
 
+    // Carta recolocada dentro de su zona de juego: se desliza desde donde se soltó
+    const same = drop?.id ? pos.get(drop.id) : undefined;
+    if (drop && same && same.zone === 'play' && same.el === prev.pos.get(drop.id!)?.el) {
+      const dx = drop.x - same.x;
+      const dy = drop.y - same.y;
+      if (Math.hypot(dx, dy) >= 3) same.el.animate([{ translate: `${dx}px ${dy}px`, zIndex: 500000 }, { translate: '0px 0px', zIndex: 500000 }], timing);
+      lastDrop.current = null;
+    }
+
     // Cartas que aparecen en otro sitio
     for (const [id, now] of appeared) {
       const oldId = pairs.get(id);
-      if (drop && ((oldId && drop.id === oldId) || (drop.lib && !oldId))) {
-        lastDrop.current = null;
-        continue; // soltada con el dedo o el ratón: ya está donde la dejaste
-      }
       let from: { x: number; y: number; w: number; zone: string } | null = null;
-      if (oldId) from = prev.pos.get(oldId)!;
+      if (drop && ((oldId && drop.id === oldId) || (drop.lib && !oldId))) {
+        // Soltada con el dedo o el ratón: sale de donde la dejaste
+        from = { ...drop, zone: now.zone };
+        lastDrop.current = null;
+      } else if (oldId) from = prev.pos.get(oldId)!;
       else if (lib[now.side] < prev.lib[now.side]) from = { ...libCenter(now.side), w: SMALL_W, zone: 'library' };
       else if (!solo && now.side === 'opp' && state.oppHand.length < prev.oppHand) from = { ...oppHandCenter(), w: SMALL_W, zone: 'hand' };
       if (!from) continue;
@@ -355,6 +358,68 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
   const selectedCard = controlledPlay.find((c) => c.id === selectedId) || null;
   const selectedSide: SideKey = selectedCard && state.opp.play.includes(selectedCard) ? 'opp' : 'me';
 
+  // ---------- Zona de juego ordenada ----------
+  // Las cartas en juego se colocan en fila, alineadas y centradas. La x guardada
+  // solo sirve para el orden (de izquierda a derecha vista por el dueño).
+  const PLAY_MAX_X = PLAY_W - CARD_W;
+  const PLAY_MID_Y = (PLAY_H - CARD_H) / 2;
+  // ¿Esta zona se ve girada (orden de derecha a izquierda)?
+  const mirroredPlay = (side: SideKey) => L.playCardPos(side, 0, 0).x > L.playCardPos(side, 100, 0).x;
+  const playInViewOrder = (side: SideKey, list?: OnlinePlayCard[]) => {
+    const sorted = [...(list ?? (side === 'me' ? state.me : state.opp).play)].sort((a, b) => a.x - b.x || a.order - b.order);
+    return mirroredPlay(side) ? sorted.reverse() : sorted;
+  };
+  const playSlotsX = (side: SideKey, n: number) => {
+    const r = zoneRect(side, 'play');
+    const gap = 16;
+    const avail = r.w - 2 * 16;
+    const step = n > 1 ? Math.min(L.cardW + gap, (avail - L.cardW) / (n - 1)) : 0;
+    const total = L.cardW + (n - 1) * step;
+    const start = r.x + (r.w - total) / 2;
+    return Array.from({ length: n }, (_, i) => start + i * step);
+  };
+  const playLayout = useMemo(() => {
+    const map = new Map<string, { x: number; y: number; slot: number }>();
+    for (const side of ['me', 'opp'] as SideKey[]) {
+      const ordered = playInViewOrder(side);
+      const xs = playSlotsX(side, ordered.length);
+      const r = zoneRect(side, 'play');
+      const y = r.y + (r.h - L.cardH) / 2;
+      ordered.forEach((c, i) => map.set(c.id, { x: xs[i], y, slot: i }));
+    }
+    return map;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.me.play, state.opp.play, L]);
+
+  // Coloca una carta en la fila de una zona de juego en la posición `index` (vista)
+  // y reparte las demás para que queden en orden. `card` es la carta ya en esa zona
+  // o el mensaje de movimiento de una carta que llega de otro sitio.
+  const placeInPlay = (side: SideKey, index: number, card: { id: string } | { msg: Record<string, unknown> }) => {
+    const movingId = 'id' in card ? card.id : null;
+    const others = playInViewOrder(side).filter((c) => c.id !== movingId);
+    const at = clamp(index, 0, others.length);
+    const ordered: (OnlinePlayCard | null)[] = [...others];
+    ordered.splice(at, 0, null); // null = la carta que se coloca
+    if (mirroredPlay(side)) ordered.reverse();
+    const n = ordered.length;
+    const keyOf = (k: number) => (n === 1 ? PLAY_MAX_X / 2 : (k * PLAY_MAX_X) / (n - 1));
+    const updates: { id: string; x: number }[] = [];
+    let mine = 0;
+    ordered.forEach((c, k) => {
+      if (c === null) mine = keyOf(k);
+      else if (Math.abs(c.x - keyOf(k)) > 0.01) updates.push({ id: c.id, x: keyOf(k) });
+    });
+    if (movingId) updates.push({ id: movingId, x: mine });
+    // Se ve al momento; el servidor confirma después
+    const byId = new Map(updates.map((u) => [u.id, u.x]));
+    patchState((s) => ({ ...s, [side]: { ...s[side], play: s[side].play.map((c) => (byId.has(c.id) ? { ...c, x: byId.get(c.id)!, y: PLAY_MID_Y } : c)) } }));
+    for (const u of updates) sendAs(side, { t: 'move', id: u.id, to: 'play', x: u.x, y: PLAY_MID_Y });
+    if (!('id' in card)) sendAs(side, { ...card.msg, to: 'play', x: mine, y: PLAY_MID_Y });
+  };
+  // Jugar al final de la fila (a la derecha, vista por el dueño)
+  const playAtEnd = (side: SideKey, msg: Record<string, unknown>) =>
+    placeInPlay(side, mirroredPlay(side) ? 0 : (side === 'me' ? state.me : state.opp).play.length, { msg });
+
   useEffect(() => {
     if (selectedId && !controlledPlay.some((c) => c.id === selectedId)) setSelectedId(null);
   }, [controlledPlay, selectedId]);
@@ -374,7 +439,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
 
   const draw = (side: SideKey = 'me') => sendAs(side, { t: 'draw', count: 1 });
   const flip = () => selectedCard && sendAs(selectedSide, { t: 'flip', id: selectedCard.id });
-  const rotate = (deg: number) => selectedCard && sendAs(selectedSide, { t: 'rotate', id: selectedCard.id, deg });
+  const tokenOnCard = () => selectedCard && sendAs(selectedSide, { t: 'tokenAdd', cardId: selectedCard.id });
   const moveSelected = (to: ZoneKey) => {
     if (!selectedCard) return;
     sendAs(selectedSide, { t: 'move', id: selectedCard.id, to });
@@ -399,8 +464,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
     const k = e.key.toLowerCase();
     if (k === 'r') draw();
     else if (k === 'f') flip();
-    else if (k === 'q') rotate(-90);
-    else if (k === 'e') rotate(90);
+    else if (k === 't') tokenOnCard();
     else if (k === 'h') moveSelected('hand');
     else if (k === 'g' || k === 'delete' || k === 'backspace') moveSelected('graveyard');
     else if (k === 'escape') setSelectedId(null);
@@ -430,17 +494,6 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
         window.clearTimeout(previewTimer.current);
         setPressPreview(previewTemplateId);
       } else hidePressPreview();
-      // En móvil, mantener pulsado el mazo muestra barajar y mirar
-      if (compact && src.kind === 'library') {
-        pressTimer.current = window.setTimeout(() => {
-          const cur = dragRef.current;
-          if (cur && !cur.moved) {
-            dragRef.current = { ...cur, longPress: true };
-            clearSelections();
-            setPileSel({ side: src.side, zone: 'library' });
-          }
-        }, 450);
-      }
     }
   };
 
@@ -454,9 +507,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
       const wasHand = selectedHandId;
       const wasToken = selectedTokenId;
       clearSelections();
-      // En móvil tocar un montón muestra sus acciones en vez de robar directamente
       if (src.kind === 'library') draw(src.side);
-      else if (src.kind === 'graveyard' && compact && canControl(src.side)) setPileSel({ side: src.side, zone: 'graveyard' });
       else if (src.kind === 'play' && canControl(src.side)) setSelectedId(src.id);
       else if (src.kind === 'hand') setSelectedHandId(wasHand === src.id ? null : src.id);
       else if (src.kind === 'token') setSelectedTokenId(wasToken === src.id ? null : src.id);
@@ -472,6 +523,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
         lib: src.kind === 'library' ? src.side : undefined,
         x: left + (small ? SMALL_W : L.cardW) / 2,
         y: top + (small ? SMALL_H : L.cardH) / 2,
+        w: small ? SMALL_W : L.cardW,
         at: Date.now(),
       };
     }
@@ -498,27 +550,21 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
     const ref = src.kind === 'library' ? { from: 'library', fromSide: seatOf(src.side) } : { id: src.id };
 
     if (to === 'play') {
-      const fromPlay = src.kind === 'play';
-      // Las posiciones se guardan vistas por el dueño de la zona
-      const { x, y } = L.playLocal(toSide, fromPlay ? left : d.x - L.cardW / 2, fromPlay ? top : d.y - L.cardH / 2);
-      if (src.kind === 'play' && src.side === toSide) {
-        // Reordenar dentro de la misma zona: se ve al instante
-        patchState((s) => {
-          const sideState = s[toSide];
-          return {
-            ...s,
-            [toSide]: { ...sideState, play: sideState.play.map((c) => (c.id === src.id ? { ...c, x, y, order: Math.max(0, ...sideState.play.map((k) => k.order)) + 1 } : c)) },
-          };
-        });
-        justDropped.current.set(src.id, Date.now());
-        setSelectedId(src.id);
-        sendAs(toSide, { t: 'move', id: src.id, to: 'play', x, y });
+      // Posición en la fila según dónde se suelte
+      const dropCx = src.kind === 'play' ? left + L.cardW / 2 : d.x;
+      const movingId = src.kind === 'play' && src.side === toSide ? src.id : null;
+      const others = playInViewOrder(toSide).filter((c) => c.id !== movingId);
+      const index = others.filter((c) => (playLayout.get(c.id)?.x ?? 0) + L.cardW / 2 < dropCx).length;
+      if (movingId) {
+        justDropped.current.set(movingId, Date.now());
+        setSelectedId(movingId);
+        placeInPlay(toSide, index, { id: movingId });
         return;
       }
       let faceUp: boolean | undefined;
       if (src.kind === 'hand') faceUp = !d.shift; // Mayús al soltar: boca abajo
       if (src.kind === 'library') faceUp = d.shift;
-      sendAs(toSide, { t: 'move', ...ref, to: 'play', x, y, faceUp });
+      placeInPlay(toSide, index, { msg: { t: 'move', ...ref, faceUp } });
       return;
     }
 
@@ -651,6 +697,9 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
   };
 
   // Biblioteca (montón boca abajo)
+  // Botón redondo de los montones (barajar)
+  const roundSize = compact ? 60 : isTouch ? 52 : 44;
+  const roundBtn: React.CSSProperties = { position: 'absolute', width: roundSize, height: roundSize, padding: 0, borderRadius: '50%', justifyContent: 'center', zIndex: 12 };
   const libraryPile = (side: SideKey) => {
     const lib = (side === 'me' ? state.me : state.opp).library;
     const r = zoneRect(side, 'library');
@@ -680,31 +729,16 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
         <div style={{ ...pill, left: r.x + r.w / 2, top: side === 'me' ? r.y + SMALL_H + 14 : r.y + 8 }}>
           Biblioteca · {lib.count}
         </div>
-        {canControl(side) && !compact && (
-          <div
-            style={{
-              position: 'absolute',
-              left: r.x + 140,
-              // Arriba los botones van pegados abajo para no tapar el contador
-              top: side === 'me' ? r.y + 14 : r.y + r.h - 14 - ((isTouch ? 2 : 3) * ui.pile + (isTouch ? 1 : 2) * 8),
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 8,
-              zIndex: 6,
-            }}
+        {canControl(side) && lib.count > 0 && (
+          <button
+            className="btn-secondary"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={() => sendAs(side, { t: 'shuffleLibrary' })}
+            title={solo ? 'Barajar la biblioteca' : 'Barajar tu biblioteca'}
+            style={{ ...roundBtn, left: cx + SMALL_W + (r.x + r.w - cx - SMALL_W - roundSize) / 2, top: cy + SMALL_H / 2 - roundSize / 2 }}
           >
-            {!isTouch && (
-              <button className="btn-secondary" style={pileBtn} title={side === 'me' ? 'Robar (R)' : 'Robar'} onClick={() => draw(side)} disabled={!lib.count}>
-                <Hand size={18} />
-              </button>
-            )}
-            <button className="btn-secondary" style={pileBtn} title={solo ? 'Barajar la biblioteca' : 'Barajar tu biblioteca'} onClick={() => sendAs(side, { t: 'shuffleLibrary' })} disabled={!lib.count}>
-              <Shuffle size={18} />
-            </button>
-            <button className="btn-secondary" style={pileBtn} title={solo ? 'Mirar la biblioteca' : 'Mirar tu biblioteca (el rival verá que lo haces)'} onClick={() => sendAs(side, { t: 'peek', zone: 'library' })} disabled={!lib.count}>
-              <Search size={18} />
-            </button>
-          </div>
+            <Shuffle size={compact ? 26 : 20} />
+          </button>
         )}
       </React.Fragment>
     );
@@ -750,17 +784,18 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
             </div>
           );
         })}
-        <div style={{ ...pill, left: canControl(side) && list.length > 0 && !compact ? r.x + (isTouch ? 70 : 82) : r.x + r.w / 2, top: side === 'me' ? r.y + 150 : r.y + 18 }}>
+        <div style={{ ...pill, left: r.x + r.w / 2, top: side === 'me' ? r.y + 150 : r.y + 18 }}>
           Cementerio · {list.length}
         </div>
-        {canControl(side) && list.length > 0 && !compact && (
+        {canControl(side) && list.length > 0 && (side === 'me' ? state.me : state.opp).library.count === 0 && (
           <button
-            className="btn-secondary"
-            style={{ ...pileBtn, position: 'absolute', left: r.x + r.w - ui.pile - 6, top: side === 'me' ? r.y + 196 - ui.pile - 6 : r.y + 6, zIndex: 12 }}
-            title={solo ? 'Ver el cementerio' : 'Ver tu cementerio (el rival verá que lo haces)'}
-            onClick={() => sendAs(side, { t: 'peek', zone: 'graveyard' })}
+            className="btn-primary"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={() => sendAs(side, { t: 'recycleGraveyard' })}
+            title="La biblioteca está vacía: barajar el cementerio y ponerlo en la biblioteca"
+            style={{ ...roundBtn, left: r.x + r.w / 2 - roundSize / 2, top: centerY - roundSize / 2, zIndex: 20 }}
           >
-            <Search size={18} />
+            <Shuffle size={compact ? 26 : 20} />
           </button>
         )}
       </React.Fragment>
@@ -797,7 +832,8 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
 
   const playCards = (side: SideKey) =>
     (side === 'me' ? state.me : state.opp).play.map((c) => {
-      const pos = L.playCardPos(side, c.x, c.y);
+      const slot = playLayout.get(c.id);
+      const pos = slot ?? L.playCardPos(side, c.x, c.y);
       const selected = canControl(side) && c.id === selectedId;
       // La carta que acabas de soltar no se desliza: ya está donde la dejaste
       const instant = Date.now() - (justDropped.current.get(c.id) || 0) < 500;
@@ -818,7 +854,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
             top: pos.y,
             width: L.cardW,
             height: L.cardH,
-            zIndex: 20 + (c.order % 100000),
+            zIndex: 20 + (slot?.slot ?? 0),
             cursor: 'grab',
             opacity: isDragged('play', c.id) ? 0.25 : 1,
           }}
@@ -863,8 +899,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
                   className="btn-secondary"
                   onPointerDown={(e) => e.stopPropagation()}
                   onClick={() => {
-                    const r2 = stdZoneRect('me', 'play');
-                    send({ t: 'move', id: selectedHand.id, to: 'play', x: (r2.w - CARD_W) / 2, y: (r2.h - CARD_H) / 2, faceUp: false });
+                    playAtEnd('me', { t: 'move', id: selectedHand.id, faceUp: false });
                     setSelectedHandId(null);
                   }}
                   title="Jugar esta carta boca abajo en el centro de tu zona"
@@ -955,8 +990,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
                 className="btn-secondary"
                 onPointerDown={(e) => e.stopPropagation()}
                 onClick={() => {
-                  const r2 = stdZoneRect('opp', 'play');
-                  sendAs('opp', { t: 'move', id: selectedOppHand.id, to: 'play', x: (r2.w - CARD_W) / 2, y: (r2.h - CARD_H) / 2, faceUp: false });
+                  playAtEnd('opp', { t: 'move', id: selectedOppHand.id, faceUp: false });
                   setSelectedHandId(null);
                 }}
                 title="Jugar esta carta boca abajo en el centro de su zona"
@@ -1129,9 +1163,62 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
     );
   };
 
+  // Tokens fijados a una carta: en su esquina, uno debajo de otro
+  const attachedIndex = new Map<string, number>();
   const tokens = state.tokens.map((t) => {
+    if (t.cardId) {
+      const slot = playLayout.get(t.cardId);
+      if (!slot) return null;
+      const k = attachedIndex.get(t.cardId) ?? 0;
+      attachedIndex.set(t.cardId, k + 1);
+      const size = TOKEN_SIZE * (compact ? 0.8 : 0.75);
+      return (
+        <div
+          key={t.id}
+          title="Token de la carta · toca para quitarlo"
+          onPointerDown={(e) => {
+            e.stopPropagation();
+            const was = selectedTokenId;
+            clearSelections();
+            setSelectedTokenId(was === t.id ? null : t.id);
+          }}
+          onDoubleClick={() => send({ t: 'tokenDelete', id: t.id })}
+          style={{
+            position: 'absolute',
+            left: slot.x + L.cardW - size * 0.75,
+            top: slot.y - size * 0.25 + k * size * 0.8,
+            width: size,
+            height: size,
+            borderRadius: '50%',
+            background: '#facc15',
+            border: '3px solid #000',
+            boxShadow: '0 4px 10px rgba(0,0,0,0.6)',
+            transition: 'left 0.35s cubic-bezier(0.25, 0.8, 0.25, 1), top 0.35s cubic-bezier(0.25, 0.8, 0.25, 1)',
+            cursor: 'pointer',
+            zIndex: 400000,
+            outline: selectedTokenId === t.id ? '3px solid var(--color-accent)' : 'none',
+            outlineOffset: 3,
+          }}
+        >
+          {selectedTokenId === t.id && !compact && (
+            <button
+              className="btn-danger"
+              title="Quitar token"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={() => {
+                send({ t: 'tokenDelete', id: t.id });
+                setSelectedTokenId(null);
+              }}
+              style={{ position: 'absolute', left: size + 6, top: -6, width: 32, height: 32, padding: 0, justifyContent: 'center', borderRadius: '50%' }}
+            >
+              <X size={14} />
+            </button>
+          )}
+        </div>
+      );
+    }
     const dragged = drag && drag.moved && drag.src.kind === 'token' && drag.src.id === t.id;
-    const view = L.toView(t.x, t.y);
+    const view = L.toView(t.x!, t.y!);
     const x = dragged ? clamp(drag.x - drag.grabX, 0, BOARD_W - TOKEN_SIZE) : view.x;
     const y = dragged ? clamp(drag.y - drag.grabY, 0, L.boardH - TOKEN_SIZE) : view.y;
     return (
@@ -1330,8 +1417,8 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
         {compact
           ? 'Mueves las cartas de los dos jugadores. Toca una biblioteca para robar (mantenla pulsada para barajar o mirar). Toca una carta para verla en grande y ver sus acciones; toca un cementerio o una vida para ver las suyas.'
           : isTouch
-          ? 'Mueves las cartas de los dos jugadores. Toca una carta para ver sus acciones y mantén pulsado para ampliarla.'
-          : 'Mueves las cartas de los dos jugadores. R: robar (abajo) · F: voltear · Q/E: girar · H: a la mano · G: al cementerio'}
+          ? 'Mueves las cartas de los dos jugadores. Toca una carta para verla en grande y ver sus acciones; toca la biblioteca para robar.'
+          : 'Mueves las cartas de los dos jugadores. Clic en la biblioteca o R: robar · H: a la mano · G: al cementerio · T: token en la carta'}
       </div>
     </div>
   );
@@ -1405,8 +1492,10 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
             {Object.keys(library.deckNames).length ? 'Elige tu mazo…' : 'No hay mazos publicados'}
           </option>
           {Object.entries(library.deckNames).map(([id, name]) => (
-            <option key={id} value={id}>
+            // Cada jugador con un mazo distinto: el del rival no se puede elegir
+            <option key={id} value={id} disabled={!!oppInfo?.deckId && oppInfo.deckId === id}>
               {name} ({library.templates.filter((t) => t.deckId === id).reduce((s, t) => s + (t.quantity || 1), 0)})
+              {oppInfo?.deckId === id ? ' · lo usa tu rival' : ''}
             </option>
           ))}
         </select>
@@ -1457,12 +1546,13 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
         {compact
           ? 'Arrastra las cartas con el dedo. Toca tu biblioteca para robar (mantenla pulsada para barajar o mirar). Toca una carta para verla en grande y ver sus acciones; toca tu cementerio o tu vida para ver las suyas.'
           : isTouch
-          ? 'Arrastra las cartas con el dedo. Toca una carta para ver sus acciones y mantén pulsado para ampliarla.'
-          : 'Arrastra las cartas entre tus franjas. R: robar · F: voltear · Q/E: girar · H: a la mano · G: al cementerio'}
+          ? 'Arrastra las cartas con el dedo. Toca una carta para verla en grande y ver sus acciones; toca la biblioteca para robar.'
+          : 'Arrastra las cartas entre tus franjas. Clic en la biblioteca o R: robar · H: a la mano · G: al cementerio · T: token en la carta'}
       </div>
     </div>
   );
 
+  const tokenDot: React.CSSProperties = { width: 12, height: 12, borderRadius: '50%', background: '#facc15', border: '2px solid #000', display: 'inline-block' };
   // Acciones de la carta seleccionada (barra flotante como en un jugador)
   const selectionBar = selectedCard && !compact && (
     <div
@@ -1484,14 +1574,8 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
       }}
     >
       <span style={{ fontWeight: 600, color: 'var(--text-muted)' }}>Carta:</span>
-      <button className="btn-secondary" onClick={flip} title="Voltear (F)" style={btn}>
-        <Eye size={ui.icon} /> Voltear
-      </button>
-      <button className="btn-secondary" onClick={() => rotate(-90)} title="Girar a la izquierda (Q)" style={btn}>
-        <RotateCcw size={ui.icon} />
-      </button>
-      <button className="btn-secondary" onClick={() => rotate(90)} title="Girar a la derecha (E)" style={btn}>
-        <RotateCw size={ui.icon} />
+      <button className="btn-secondary" onClick={tokenOnCard} title="Poner un token en esta carta (T)" style={btn}>
+        <span style={tokenDot} /> Token
       </button>
       <button className="btn-secondary" onClick={() => moveSelected('hand')} title="A la mano (H)" style={btn}>
         <Hand size={ui.icon} /> A la mano
@@ -1512,14 +1596,8 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
       barTitle = 'Carta';
       barContent = (
         <>
-          <button className="btn-secondary" onClick={flip} style={barBtn}>
-            <Eye size={16} /> Voltear
-          </button>
-          <button className="btn-secondary" onClick={() => rotate(-90)} style={barBtn} title="Girar a la izquierda">
-            <RotateCcw size={16} />
-          </button>
-          <button className="btn-secondary" onClick={() => rotate(90)} style={barBtn} title="Girar a la derecha">
-            <RotateCw size={16} />
+          <button className="btn-secondary" onClick={tokenOnCard} style={barBtn}>
+            <span style={tokenDot} /> Token
           </button>
           <button className="btn-secondary" onClick={() => moveSelected('hand')} style={barBtn}>
             <Hand size={16} /> Mano
@@ -1543,7 +1621,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
           <button
             className="btn-secondary"
             onClick={() => {
-              sendAs(side, { t: 'move', id, to: 'play', x: (PLAY_W - CARD_W) / 2, y: (PLAY_H - CARD_H) / 2, faceUp: true });
+              playAtEnd(side, { t: 'move', id, faceUp: true });
               setSelectedHandId(null);
             }}
             style={barBtn}
@@ -1553,7 +1631,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
           <button
             className="btn-secondary"
             onClick={() => {
-              sendAs(side, { t: 'move', id, to: 'play', x: (PLAY_W - CARD_W) / 2, y: (PLAY_H - CARD_H) / 2, faceUp: false });
+              playAtEnd(side, { t: 'move', id, faceUp: false });
               setSelectedHandId(null);
             }}
             style={barBtn}
@@ -1584,46 +1662,6 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
           style={barBtn}
         >
           <X size={16} /> Quitar token
-        </button>
-      );
-    } else if (pileSel?.zone === 'library') {
-      const side = pileSel.side;
-      const count = (side === 'me' ? state.me : state.opp).library.count;
-      barTitle = solo ? `Biblioteca de ${sideName(side)}` : 'Tu biblioteca';
-      barContent = (
-        <>
-          <button className="btn-primary" onClick={() => draw(side)} disabled={!count} style={barBtn}>
-            <Hand size={16} /> Robar
-          </button>
-          <button className="btn-secondary" onClick={() => sendAs(side, { t: 'shuffleLibrary' })} disabled={!count} style={barBtn}>
-            <Shuffle size={16} /> Barajar
-          </button>
-          <button
-            className="btn-secondary"
-            onClick={() => {
-              sendAs(side, { t: 'peek', zone: 'library' });
-              setPileSel(null);
-            }}
-            disabled={!count}
-            style={barBtn}
-          >
-            <Search size={16} /> Mirar
-          </button>
-        </>
-      );
-    } else if (pileSel?.zone === 'graveyard') {
-      const side = pileSel.side;
-      barTitle = solo ? `Cementerio de ${sideName(side)}` : 'Tu cementerio';
-      barContent = (
-        <button
-          className="btn-secondary"
-          onClick={() => {
-            sendAs(side, { t: 'peek', zone: 'graveyard' });
-            setPileSel(null);
-          }}
-          style={barBtn}
-        >
-          <Search size={16} /> Ver cartas
         </button>
       );
     } else if (lifeSel) {

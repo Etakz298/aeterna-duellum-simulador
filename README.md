@@ -10,17 +10,19 @@ Simulador de mesa para Aeterna Duellum. Funciona como app de escritorio (Electro
   - *Traer mazos del 1 vs 1* copia en este ordenador los mazos publicados en el servidor (cartas, cantidades y dorsos), para usarlos también en un jugador. Si ya hay un mazo con el mismo nombre, pregunta antes de cambiar sus cartas.
 - **Online 1 contra 1**: botón *Jugar Online (1 vs 1)* en el menú lateral.
   - Un jugador crea una sala y comparte el código (o el enlace de invitación `https://<servidor>/?sala=CODIGO`).
-  - Cada uno elige su mazo y pulsa *Poner mi mazo barajado en la mesa*.
+  - Cada uno elige su mazo (no pueden usar el mismo) y pulsa *Poner mi mazo barajado en la mesa*.
   - La mesa tiene el mismo aspecto que la de un jugador, con franjas marcadas para cada zona. Se escala a la ventana, así los dos jugadores la ven igual sea cual sea su resolución. Tu rival aparece enfrente (girado 180º).
   - Cada jugador tiene: **Biblioteca** (a la izquierda de la mano), **Mano** (privada), **Cementerio** (a la derecha: las cartas quedan boca abajo, giradas 90º a la izquierda y la última arriba) y su **Zona de juego**.
   - Las cartas nunca salen de las zonas. Puedes coger una carta de la zona de juego o del cementerio del rival y llevarla a tu mano, tu zona de juego o tu cementerio.
   - Vida fija a los lados: la tuya a la izquierda (solo tú puedes cambiarla) y la del rival a la derecha.
-  - **Tokens**: fichas amarillas que se ponen encima de las cartas y se mueven libremente. Doble clic o clic derecho para quitarlas.
+  - **Zona de juego ordenada**: las cartas se colocan en fila, alineadas y centradas; al soltar una se mete en el hueco más cercano.
+  - **Tokens**: en el menú de una carta en juego, *Token* pone una ficha amarilla fijada a esa carta (la sigue al reordenar y se borra si la carta sale de la mesa). El botón *Token* del panel pone fichas sueltas que se mueven libremente. Doble clic, clic derecho o tocar y *Quitar* para quitarlas.
+  - Biblioteca: tocarla roba y el botón redondo baraja. Si se acaba, en el cementerio aparece un botón para devolverlo barajado a la biblioteca.
   - El servidor es el único que sabe qué carta es cada carta boca abajo: los navegadores no reciben esa información hasta que la carta se voltea, así que no se puede hacer trampa mirando el tráfico.
   - Registro de la partida y chat en el botón *Chat*.
   - **Enseñar mi mano**: botón en tu mano para que el rival vea todas tus cartas hasta que pulses *Ocultar mi mano*.
   - **Terminar partida**: pregunta quién ha ganado y lo guarda en el **Historial** (por sala, de hoy o todas), con victorias y derrotas por jugador y por mazo. El historial se guarda en el servidor junto a los mazos publicados, así que en Railway necesita el volumen para no perderse.
-  - **Móvil**: las zonas de juego se dibujan más bajas para que las manos y los montones se vean más grandes; la mesa se ve entera y el panel pasa a un botón de menú (☰). Siempre se ve en horizontal: si el móvil está en vertical, la aplicación se gira sola. Al tocar una carta se ve en grande 8 segundos (se quita al arrastrarla o al tocar el tablero vacío) y sus acciones aparecen en el centro; tocar la biblioteca roba (mantenerla pulsada: barajar o mirar); tocar el cementerio o una vida muestra sus acciones. El botón de pantalla completa quita las barras del navegador (en iPhone: Compartir → *Añadir a pantalla de inicio* y abrirlo desde ese icono).
+  - **Móvil**: las zonas de juego se dibujan más bajas para que las manos y los montones se vean más grandes; la mesa se ve entera y el panel pasa a un botón de menú (☰). Siempre se ve en horizontal: si el móvil está en vertical, la aplicación se gira sola. Al tocar una carta se ve en grande 8 segundos (se quita al arrastrarla o al tocar el tablero vacío) y sus acciones aparecen en el centro; tocar la biblioteca roba y el botón redondo de al lado baraja; tocar una vida muestra sus acciones. El botón de pantalla completa quita las barras del navegador (en iPhone: Compartir → *Añadir a pantalla de inicio* y abrirlo desde ese icono).
   - Las cartas se deslizan con una animación al cambiar de zona (robar, jugar, al cementerio, a la biblioteca…), también las que mueve el rival.
   - **Tablet**: arrastra con el dedo; toca una carta de la mano para *Enseñar* o *Jugar boca abajo*; toca una carta para verla en grande; toca la biblioteca para robar y un token para quitarlo. Mejor en horizontal.
   - Si se cierra la ventana o se cae la conexión, al volver se recupera el sitio en la sala.
@@ -31,10 +33,9 @@ Simulador de mesa para Aeterna Duellum. Funciona como app de escritorio (Electro
 | --- | --- |
 | Robar | Clic en tu biblioteca o tecla **R** |
 | Jugar una carta | Arrastrarla de la mano a tu zona de juego (boca arriba; manteniendo **Mayús** al soltar, boca abajo) |
-| Mover cartas | Arrastrar entre tus zonas; dentro de tu zona de juego se colocan donde quieras |
-| Mirar tu biblioteca o cementerio | Botón de la lupa junto al montón. El rival ve en el registro que lo haces |
+| Mover cartas | Arrastrar entre tus zonas; en tu zona de juego se ordenan en fila según dónde las sueltes |
 | Enseñar una carta de la mano sin jugarla | Pasar el ratón por encima y *Enseñar* |
-| Carta seleccionada | **F** voltear, **Q/E** girar, **H** a la mano, **G** al cementerio |
+| Carta seleccionada | *Token*, *A la mano*, *Cementerio* (teclas **T**, **H**, **G**; **F** o doble clic voltea) |
 
 ## Servidor online
 
