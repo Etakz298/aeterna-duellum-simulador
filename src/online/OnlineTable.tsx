@@ -16,6 +16,7 @@ import {
   Minimize,
   LogOut,
   MessageSquare,
+  Smile,
   RefreshCw,
   Shuffle,
   Trophy,
@@ -46,6 +47,7 @@ import {
   type ZoneKey,
 } from './layout';
 import { inviteLink } from './server';
+import { EmojiPicker, MicButton, RecordingBar, VoiceMessage, isEmojiOnly, useVoiceRecorder } from './ChatExtras';
 import { MatchHistory } from './MatchHistory';
 import { IOS_FULLSCREEN_HINT, fullscreenSupported, toggleFullscreen, useIsFullscreen } from '../fullscreen';
 import { appPoint, appRect } from '../rotation';
@@ -144,6 +146,12 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
   const [seenChat, setSeenChat] = useState(() => new Set(state.log.filter((e) => e.kind === 'chat').map((e) => e.id)));
   // Mensajes de chat del rival que aparecen en el lateral aunque el chat esté cerrado
   const [chatToasts, setChatToasts] = useState<{ id: string; text: string; leaving?: boolean }[]>([]);
+  // Selector de emojis (en la mesa se envían al momento; en el chat se añaden al texto)
+  const [emojiOpen, setEmojiOpen] = useState<'board' | 'panel' | null>(null);
+  // Emojis sueltos que suben por la mesa al enviarlos
+  const [bursts, setBursts] = useState<{ id: string; text: string; mine: boolean }[]>([]);
+  const burstSeen = useRef(new Set(state.log.filter((e) => e.kind === 'chat').map((e) => e.id)));
+  const [micSlide, setMicSlide] = useState(0);
   const toastedChat = useRef(new Set(state.log.filter((e) => e.kind === 'chat').map((e) => e.id)));
   const [hoverTemplate, setHoverTemplate] = useState<{ cardId: string; templateId: string } | null>(null);
   const [hoverHandId, setHoverHandId] = useState<string | null>(null);
@@ -1558,12 +1566,31 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
     }
   };
 
+  const voice = useVoiceRecorder(
+    (clip) => send({ t: 'voice', ...clip }),
+    (message) => toast(message),
+  );
+  const audioUrl = (id: string) => `${serverUrl}/api/audio?room=${encodeURIComponent(state.code)}&id=${encodeURIComponent(id)}`;
+  const voiceOf = (entry: (typeof state.log)[number], color?: string) =>
+    entry.audio && (
+      <VoiceMessage
+        id={entry.audio.id}
+        url={audioUrl(entry.audio.id)}
+        dur={entry.audio.dur}
+        wave={entry.audio.wave}
+        mine={entry.by === state.you}
+        heard={entry.audio.heard}
+        color={color}
+        onPlayed={() => !entry.audio?.heard && send({ t: 'voiceHeard', id: entry.audio?.id })}
+      />
+    );
   const sendChat = (e: React.FormEvent) => {
     e.preventDefault();
     const text = chatText.trim();
     if (!text) return;
     send({ t: 'chat', text });
     setChatText('');
+    setEmojiOpen(null);
   };
 
   useEffect(() => {
@@ -1576,14 +1603,60 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
     playChatSound();
     setChatToasts((prev) => [...prev, ...fresh.map((e) => ({ id: e.id, text: e.text }))].slice(-3));
     for (const e of fresh) {
-      window.setTimeout(() => setChatToasts((prev) => prev.map((t) => (t.id === e.id ? { ...t, leaving: true } : t))), 5000);
-      window.setTimeout(() => setChatToasts((prev) => prev.filter((t) => t.id !== e.id)), 5400);
+      // Los audios se quedan más tiempo para poder escucharlos sin abrir el chat
+      const wait = e.audio ? 15000 : 5000;
+      window.setTimeout(() => setChatToasts((prev) => prev.map((t) => (t.id === e.id ? { ...t, leaving: true } : t))), wait);
+      window.setTimeout(() => setChatToasts((prev) => prev.filter((t) => t.id !== e.id)), wait + 400);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.log]);
   useEffect(() => {
     if (showLog) setChatToasts([]);
   }, [showLog]);
+  // El selector de emojis de la mesa se cierra al tocar fuera
+  useEffect(() => {
+    if (emojiOpen !== 'board') return;
+    const close = () => setEmojiOpen(null);
+    window.addEventListener('pointerdown', close);
+    return () => window.removeEventListener('pointerdown', close);
+  }, [emojiOpen]);
+  // Mensajes solo de emojis: además salen grandes por la mesa (para los dos)
+  useEffect(() => {
+    const fresh = state.log.filter((e) => e.kind === 'chat' && !burstSeen.current.has(e.id));
+    for (const e of fresh) burstSeen.current.add(e.id);
+    if (solo) return;
+    const emo = fresh
+      .filter((e) => !e.audio && e.by)
+      .map((e) => ({ id: e.id, text: e.text.slice((state.players[e.by!]?.name || '').length + 2), mine: e.by === state.you }))
+      .filter((b) => isEmojiOnly(b.text));
+    if (!emo.length) return;
+    setBursts((prev) => [...prev, ...emo].slice(-4));
+    for (const b of emo) window.setTimeout(() => setBursts((prev) => prev.filter((x) => x.id !== b.id)), 2600);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.log]);
+  const chatBody = (entry: (typeof state.log)[number]) => {
+    if (entry.kind !== 'chat' || !entry.by) return null;
+    const name = state.players[entry.by]?.name || '';
+    const prefix = `${name}: `;
+    if (!entry.text.startsWith(prefix)) return null;
+    const rest = entry.text.slice(prefix.length);
+    const color = (entry.by === state.you ? myBackColor : oppBackColor) || undefined;
+    if (entry.audio)
+      return (
+        <>
+          {logText(prefix)}
+          <div style={{ marginTop: 4 }}>{voiceOf(entry, color)}</div>
+        </>
+      );
+    if (isEmojiOnly(rest))
+      return (
+        <>
+          {logText(prefix)}
+          <span style={{ fontSize: '1.9rem', lineHeight: 1.15, verticalAlign: 'middle' }}>{rest}</span>
+        </>
+      );
+    return null;
+  };
 
   const handRevealed = !!myInfo?.handRevealed;
   // Solo cuentan los mensajes del rival sin leer
@@ -2259,12 +2332,31 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
                   }}
                 >
                   <span style={{ opacity: 0.5, marginRight: 4 }}>{new Date(entry.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                  {logText(entry.text)}
+                  {chatBody(entry) ?? logText(entry.text)}
                 </div>
               ))}
               <div ref={logEndRef} />
             </div>
-            {!solo && <form onSubmit={sendChat} style={{ display: 'flex', gap: 6, padding: 8, borderTop: '1px solid var(--glass-border)' }}>
+            {!solo && <form onSubmit={sendChat} style={{ position: 'relative', display: 'flex', gap: 6, padding: 8, borderTop: '1px solid var(--glass-border)', alignItems: 'center' }}>
+              {emojiOpen === 'panel' && (
+                <EmojiPicker
+                  onPick={(e) => setChatText((t) => (t + e).slice(0, 300))}
+                  style={{ position: 'absolute', left: 8, right: 8, bottom: 'calc(100% + 6px)' }}
+                />
+              )}
+              {voice.phase !== 'idle' ? (
+                <RecordingBar rec={voice} slide={micSlide} style={{ flex: 1, padding: '4px 8px', border: 'none', background: 'transparent', overflow: 'hidden' }} />
+              ) : (
+              <>
+              <button
+                type="button"
+                className="btn-secondary"
+                title="Emojis"
+                onClick={() => setEmojiOpen((o) => (o === 'panel' ? null : 'panel'))}
+                style={{ padding: 6, display: 'flex', background: emojiOpen === 'panel' ? 'rgba(255,255,255,0.15)' : undefined }}
+              >
+                <Smile size={16} />
+              </button>
               <input
                 value={chatText}
                 onChange={(e) => setChatText(e.target.value)}
@@ -2282,9 +2374,15 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
                   outline: 'none',
                 }}
               />
-              <button className="btn-primary" type="submit" style={{ padding: '6px 10px', fontSize: '0.75rem' }}>
-                Enviar
-              </button>
+              </>
+              )}
+              {chatText.trim() && voice.phase === 'idle' ? (
+                <button className="btn-primary" type="submit" style={{ padding: '6px 10px', fontSize: '0.75rem' }}>
+                  Enviar
+                </button>
+              ) : (
+                <MicButton rec={voice} size={16} onSlide={setMicSlide} style={{ padding: 6 }} />
+              )}
             </form>}
           </div>
         )}
@@ -2300,18 +2398,53 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
 
         {/* Botón de chat siempre a mano arriba a la derecha */}
         {!solo && !showLog && (
-          <button
-            className="btn-secondary"
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={() => setShowLog(true)}
-            title="Abrir el chat"
-            style={{ position: 'absolute', top: compact ? 8 : 12, right: compact ? 8 : 12, zIndex: 650000, padding: compact ? 9 : '8px 12px', background: 'rgba(18,24,38,0.92)', display: 'flex', alignItems: 'center', gap: 6 }}
-          >
-            <MessageSquare size={compact ? 20 : 16} />
-            {!compact && 'Chat'}
-            {unread > 0 && <span style={{ background: 'var(--color-accent)', borderRadius: 10, padding: '0 6px', fontSize: 12, color: '#fff' }}>{unread}</span>}
-          </button>
+          <div style={{ position: 'absolute', top: compact ? 8 : 12, right: compact ? 8 : 12, zIndex: 650000, display: 'flex', gap: 6, alignItems: 'center' }}>
+            {voice.phase !== 'idle' && <RecordingBar rec={voice} slide={micSlide} />}
+            {voice.phase === 'idle' && (
+              <button
+                className="btn-secondary"
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={() => setEmojiOpen((o) => (o === 'board' ? null : 'board'))}
+                title="Enviar un emoji"
+                style={{ padding: compact ? 9 : 8, background: emojiOpen === 'board' ? 'rgba(60,70,95,0.95)' : 'rgba(18,24,38,0.92)', display: 'flex' }}
+              >
+                <Smile size={compact ? 20 : 16} />
+              </button>
+            )}
+            <MicButton rec={voice} size={compact ? 20 : 16} onSlide={setMicSlide} style={{ padding: compact ? 9 : 8, background: voice.phase === 'idle' ? 'rgba(18,24,38,0.92)' : undefined }} />
+            <button
+              className="btn-secondary"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={() => {
+                setEmojiOpen(null);
+                setShowLog(true);
+              }}
+              title="Abrir el chat"
+              style={{ padding: compact ? 9 : '8px 12px', background: 'rgba(18,24,38,0.92)', display: 'flex', alignItems: 'center', gap: 6 }}
+            >
+              <MessageSquare size={compact ? 20 : 16} />
+              {!compact && 'Chat'}
+              {unread > 0 && <span style={{ background: 'var(--color-accent)', borderRadius: 10, padding: '0 6px', fontSize: 12, color: '#fff' }}>{unread}</span>}
+            </button>
+            {emojiOpen === 'board' && (
+              <EmojiPicker
+                big={compact}
+                onPick={(e) => {
+                  send({ t: 'chat', text: e });
+                  setEmojiOpen(null);
+                }}
+                style={{ position: 'absolute', top: 'calc(100% + 6px)', right: 0, width: compact ? 330 : 300 }}
+              />
+            )}
+          </div>
         )}
+
+        {/* Emojis enviados: suben grandes por la mesa */}
+        {bursts.map((b) => (
+          <div key={b.id} className="ol-emoji-burst" style={{ left: b.mine ? '38%' : '62%', top: b.mine ? '62%' : '30%' }}>
+            {b.text}
+          </div>
+        ))}
 
         {/* Avisos de chat del rival: entran por la derecha y se van solos; al pulsarlos se abre el chat */}
         {chatToasts.length > 0 && (
@@ -2326,7 +2459,17 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
                 style={{ pointerEvents: 'auto', cursor: 'pointer', maxWidth: compact ? 260 : 340, padding: '10px 14px', fontSize: compact ? 14 : 15, display: 'flex', gap: 8, alignItems: 'flex-start', boxShadow: '0 10px 30px rgba(0,0,0,0.5)' }}
               >
                 <MessageSquare size={16} style={{ flexShrink: 0, marginTop: 2, color: 'var(--color-accent)' }} />
-                <span style={{ wordBreak: 'break-word' }}>{t.text}</span>
+                {(() => {
+                  const entry = state.log.find((e) => e.id === t.id);
+                  if (entry?.audio)
+                    return (
+                      <span>
+                        {logText(t.text.replace(/mensaje de voz$/, ''))}
+                        <div style={{ marginTop: 4 }}>{voiceOf(entry, oppBackColor || undefined)}</div>
+                      </span>
+                    );
+                  return <span style={{ wordBreak: 'break-word' }}>{t.text}</span>;
+                })()}
               </div>
             ))}
           </div>

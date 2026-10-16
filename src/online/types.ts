@@ -50,6 +50,7 @@ export interface LogEntry {
   kind: 'event' | 'chat' | 'reveal';
   text: string;
   by?: Seat; // quién escribió (mensajes de chat)
+  audio?: { id: string; dur: number; wave: number[]; heard?: boolean }; // mensaje de voz
 }
 
 export interface OnlineToken {
