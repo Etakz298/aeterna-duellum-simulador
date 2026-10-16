@@ -60,6 +60,7 @@ interface SidebarProps {
   onUpdateTemplateBackType: (id: string, backType: 'backA' | 'backB') => void;
   onUpdateTemplateQuantity: (id: string, quantity: number) => void;
   onUpdateTemplateSpecial: (id: string, isSpecial: boolean) => void;
+  onUpdateTemplateLife: (id: string, isLife: boolean) => void;
   onAddCardsToBoard: (templateId: string, count: number) => void;
   onAddDeckToBoard: (deckId: string) => void; // Add full deck at once!
   onAddCounter: () => void;
@@ -88,6 +89,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onUpdateTemplateBackType,
   onUpdateTemplateQuantity,
   onUpdateTemplateSpecial,
+  onUpdateTemplateLife,
   onAddCardsToBoard,
   onAddDeckToBoard,
   onAddCounter,
@@ -1019,6 +1021,22 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                 }}
                               >
                                 ★ Especial
+                              </button>
+
+                              {/* Carta de vida: se usa como contador de vida y no entra en la biblioteca */}
+                              <button
+                                onClick={() => onUpdateTemplateLife(template.id, !template.isLife)}
+                                title="Carta de vida (de 10 a 0): en la mesa se usa como contador de vida con un token y no entra en la biblioteca"
+                                style={{
+                                  padding: '2px 6px',
+                                  fontSize: '0.65rem',
+                                  borderRadius: '4px',
+                                  border: `1px solid ${template.isLife ? '#f87171' : 'var(--glass-border)'}`,
+                                  background: template.isLife ? 'rgba(248, 113, 113, 0.2)' : 'transparent',
+                                  color: template.isLife ? '#f87171' : 'var(--text-muted)',
+                                }}
+                              >
+                                ♥ Vida
                               </button>
                             </div>
 

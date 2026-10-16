@@ -136,6 +136,7 @@ export async function publishLibrary(
         backType: t.backType,
         quantity: t.quantity,
         isSpecial: !!t.isSpecial,
+        isLife: !!t.isLife,
         image: `${t.id}.webp`,
       })),
       backs,

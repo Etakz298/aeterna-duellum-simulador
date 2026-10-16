@@ -75,6 +75,7 @@ function publicLibrary() {
       backType: t.backType,
       quantity: t.quantity,
       isSpecial: !!t.isSpecial,
+      isLife: !!t.isLife,
       imageUrl: t.image ? `/media/${t.image}?v=${library.updatedAt}` : undefined,
     })),
     backs: Object.fromEntries(
@@ -217,6 +218,7 @@ async function handleHttp(req, res) {
           backType: t.backType === 'backB' ? 'backB' : 'backA',
           quantity: Math.max(1, Math.min(60, Number(t.quantity) || 1)),
           isSpecial: !!t.isSpecial,
+          isLife: !!t.isLife,
           image: t.image,
         }));
       const backs = {};

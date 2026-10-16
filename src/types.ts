@@ -7,6 +7,7 @@ export interface CardTemplate {
   backType: 'backA' | 'backB';
   quantity: number; // Number of copies of this card in the deck
   isSpecial?: boolean; // Special cards always go on top of the deck
+  isLife?: boolean; // Carta de vida (contador 10→0): no entra en la biblioteca, se usa como contador
   createdAt: number;
 }
 

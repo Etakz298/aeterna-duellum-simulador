@@ -18,6 +18,23 @@ export const ZONE_GAP = 20;
 export const LIFE_MIN = 0;
 export const LIFE_MAX = 10;
 
+// Carta de vida (de 10 a 0): proporción y centro de cada número, en fracciones
+// del ancho y del alto de la carta (todas las cartas de vida usan el mismo dibujo)
+export const LIFE_CARD_RATIO = 800 / 1244;
+export const LIFE_TRACK: [number, number][] = [
+  [688, 1131], // 0
+  [565, 1008], // 1
+  [400, 927], // 2
+  [234, 849], // 3
+  [112, 723], // 4
+  [234, 599], // 5
+  [400, 519], // 6
+  [565, 440], // 7
+  [688, 315], // 8
+  [565, 190], // 9
+  [400, 112], // 10
+].map(([x, y]) => [x / 800, y / 1244]);
+
 export interface Rect {
   x: number;
   y: number;

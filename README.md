@@ -15,6 +15,7 @@ Simulador de mesa para Aeterna Duellum. Funciona como app de escritorio (Electro
   - Cada jugador tiene: **Biblioteca** (a la izquierda de la mano), **Mano** (privada), **Cementerio** (a la derecha: las cartas quedan boca abajo, giradas 90º a la izquierda y la última arriba) y su **Zona de juego**.
   - Las cartas nunca salen de las zonas. Puedes coger una carta de la zona de juego o del cementerio del rival y llevarla a tu mano, tu zona de juego o tu cementerio.
   - Vida fija a los lados: la tuya a la izquierda (solo tú puedes cambiarla) y la del rival a la derecha.
+  - **Carta de vida**: en *Mazos*, marca con **♥ Vida** la carta de contador (de 10 a 0) de cada campeón y publica los mazos. En la mesa esa carta sustituye al contador redondo: un token empieza en el 10 y se desliza al número con **+** y **−** (en el móvil, tocando la carta). No entra en la biblioteca. Los mazos sin carta de vida siguen con el contador de siempre.
   - **Zona de juego ordenada**: las cartas se colocan en fila, alineadas y centradas; al soltar una se mete en el hueco más cercano.
   - **Tokens**: en el menú de una carta en juego, *Token* pone una ficha amarilla fijada a esa carta (la sigue al reordenar y se borra si la carta sale de la mesa). El botón *Token* del panel pone fichas sueltas que se mueven libremente. Doble clic, clic derecho o tocar y *Quitar* para quitarlas.
   - Biblioteca: tocarla roba y el botón redondo baraja. Si se acaba, en el cementerio aparece un botón para devolverlo barajado a la biblioteca.

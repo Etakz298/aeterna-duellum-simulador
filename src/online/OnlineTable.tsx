@@ -26,6 +26,8 @@ import {
   BOARD_W,
   CARD_H,
   CARD_W,
+  LIFE_CARD_RATIO,
+  LIFE_TRACK,
   LIFE_MAX,
   LIFE_MIN,
   PLAY_H,
@@ -1072,7 +1074,89 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
   };
 
   // Contadores de vida redondos, fijos: el tuyo a la izquierda y el del rival a la derecha
+  // Carta de vida del mazo (de 10 a 0): el token marca la vida y se mueve con + y −
+  const lifeTemplateOf = (side: SideKey) => {
+    const deckId = state.players[seatOf(side)]?.deckId;
+    return deckId ? library.templates.find((t) => t.deckId === deckId && t.isLife && t.imageUrl) : undefined;
+  };
+  const lifeCard = (side: SideKey, tpl: CardTemplate) => {
+    const mine = canControl(side);
+    const value = clamp(side === 'me' ? state.life.me : state.life.opp, LIFE_MIN, LIFE_MAX);
+    const info = side === 'me' ? myInfo : oppInfo;
+    const h = compact ? 226 : 300;
+    const w = h * LIFE_CARD_RATIO;
+    const cx = side === 'me' ? SIDE_W / 2 : BOARD_W - SIDE_W / 2;
+    const pr = zoneRect(side, 'play');
+    const top = pr.y + pr.h / 2 - h / 2 - (compact ? 0 : 14);
+    const left = cx - w / 2;
+    const [tx, ty] = LIFE_TRACK[value];
+    const token = w * 0.16;
+    const btnStyle: React.CSSProperties = { width: ui.life + 6, height: ui.life + 6, fontSize: isTouch ? 26 : 22 };
+    return (
+      <React.Fragment key={`life-${side}`}>
+        <div
+          title={mine && !compact ? undefined : `Vida: ${value}`}
+          onPointerDown={compact && mine ? (e) => e.stopPropagation() : undefined}
+          onClick={
+            compact && mine
+              ? () => {
+                  clearSelections();
+                  setLifeSel(side);
+                }
+              : undefined
+          }
+          style={{
+            position: 'absolute',
+            left,
+            top,
+            width: w,
+            height: h,
+            borderRadius: 14,
+            overflow: 'hidden',
+            zIndex: 50,
+            cursor: compact && mine ? 'pointer' : 'default',
+            boxShadow: lifeSel === side ? '0 0 0 4px var(--color-accent), 0 10px 25px rgba(0,0,0,0.5)' : '0 10px 25px rgba(0,0,0,0.5)',
+          }}
+        >
+          <img src={tpl.imageUrl} alt={tpl.name} draggable={false} style={{ width: '100%', height: '100%', objectFit: 'cover', pointerEvents: 'none' }} />
+          {/* Token de vida: se desliza hasta el número */}
+          <div
+            style={{
+              position: 'absolute',
+              left: tx * w - token / 2,
+              top: ty * h - token / 2,
+              width: token,
+              height: token,
+              borderRadius: '50%',
+              background: 'radial-gradient(circle at 35% 30%, #fde68a, #facc15 55%, #ca8a04)',
+              border: '3px solid #000',
+              boxShadow: '0 6px 12px rgba(0,0,0,0.55)',
+              opacity: 0.92,
+              transition: 'left 0.5s cubic-bezier(0.34, 1.3, 0.64, 1), top 0.5s cubic-bezier(0.34, 1.3, 0.64, 1)',
+              pointerEvents: 'none',
+            }}
+          />
+        </div>
+        <div style={{ ...pill, left: cx, top: top - 30, zIndex: 51 }}>
+          {solo ? deckNameOf(side) || info?.name : info ? info.name : 'Esperando…'} · {value}
+        </div>
+        {mine && !compact && (
+          <div style={{ position: 'absolute', left: cx, top: top + h + 8, transform: 'translateX(-50%)', display: 'flex', gap: 14, zIndex: 51 }}>
+            <button className="life-counter-btn" style={btnStyle} onClick={() => setLife(side, value - 1)} disabled={value <= LIFE_MIN} title="Restar vida">
+              −
+            </button>
+            <button className="life-counter-btn" style={btnStyle} onClick={() => setLife(side, value + 1)} disabled={value >= LIFE_MAX} title="Sumar vida">
+              +
+            </button>
+          </div>
+        )}
+      </React.Fragment>
+    );
+  };
+
   const lifeCounter = (side: SideKey) => {
+    const lifeTpl = lifeTemplateOf(side);
+    if (lifeTpl) return lifeCard(side, lifeTpl);
     const mine = canControl(side);
     const value = side === 'me' ? state.life.me : state.life.opp;
     const info = side === 'me' ? myInfo : oppInfo;
@@ -1333,7 +1417,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
       </option>
       {Object.entries(library.deckNames).map(([id, name]) => (
         <option key={id} value={id}>
-          {name} ({library.templates.filter((t) => t.deckId === id).reduce((s, t) => s + (t.quantity || 1), 0)})
+          {name} ({library.templates.filter((t) => t.deckId === id && !t.isLife).reduce((s, t) => s + (t.quantity || 1), 0)})
         </option>
       ))}
     </select>
@@ -1494,7 +1578,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
           {Object.entries(library.deckNames).map(([id, name]) => (
             // Cada jugador con un mazo distinto: el del rival no se puede elegir
             <option key={id} value={id} disabled={!!oppInfo?.deckId && oppInfo.deckId === id}>
-              {name} ({library.templates.filter((t) => t.deckId === id).reduce((s, t) => s + (t.quantity || 1), 0)})
+              {name} ({library.templates.filter((t) => t.deckId === id && !t.isLife).reduce((s, t) => s + (t.quantity || 1), 0)})
               {oppInfo?.deckId === id ? ' · lo usa tu rival' : ''}
             </option>
           ))}
