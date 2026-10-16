@@ -2,7 +2,7 @@
 // vertical, todo se gira 90º (como si ya estuviera tumbado) y las coordenadas
 // de los toques se pasan al sistema de la aplicación girada.
 
-const isPhone = () => {
+export const isPhone = () => {
   if (typeof window === 'undefined') return false;
   const coarse = !!window.matchMedia?.('(pointer: coarse)').matches;
   return coarse && Math.min(screen.width, screen.height) <= 540;
