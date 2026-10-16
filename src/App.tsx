@@ -449,7 +449,7 @@ export default function App() {
 
   // Add Batch Templates (Conjuntos de imágenes)
   const handleAddTemplates = async (
-    templatesData: { name: string; blob: Blob; deckId: string; backType: 'backA' | 'backB'; quantity?: number }[]
+    templatesData: { name: string; blob: Blob; deckId: string; backType: 'backA' | 'backB'; quantity?: number; isSpecial?: boolean; isLife?: boolean }[]
   ) => {
     const newTemplates: CardTemplate[] = [];
 
@@ -461,6 +461,8 @@ export default function App() {
         deckId: item.deckId,
         backType: item.backType,
         quantity: item.quantity || 1, // Default to parsed quantity or 1
+        isSpecial: !!item.isSpecial,
+        isLife: !!item.isLife,
         createdAt: Date.now(),
       };
 
@@ -471,7 +473,17 @@ export default function App() {
       newTemplates.push(template);
     }
 
-    setTemplates((prev) => [...prev, ...newTemplates]);
+    // Solo una carta de vida por mazo: la nueva sustituye a la anterior
+    const lifeDecks = new Set(newTemplates.filter((t) => t.isLife).map((t) => t.deckId));
+    setTemplates((prev) => [
+      ...prev.map((t) => {
+        if (!t.isLife || !lifeDecks.has(t.deckId)) return t;
+        const updated = { ...t, isLife: false };
+        saveCardTemplate(updated);
+        return updated;
+      }),
+      ...newTemplates,
+    ]);
   };
 
   // Delete Template from Library (using custom modal confirmation)
