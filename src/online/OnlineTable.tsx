@@ -2273,7 +2273,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
           <div
             style={{
               position: 'absolute',
-              top: 12,
+              top: solo ? 12 : compact ? 56 : 58, // por debajo de los botones de emojis, audio y chat
               right: 12, // siempre en la misma esquina
               height: 'min(480px, 62%)',
               aspectRatio: `${CARD_W} / ${CARD_H}`,
