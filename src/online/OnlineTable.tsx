@@ -638,7 +638,6 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
       const index = others.filter((c) => (playLayout.get(c.id)?.x ?? 0) + L.cardW / 2 < dropCx).length;
       if (movingId) {
         justDropped.current.set(movingId, Date.now());
-        setSelectedId(movingId);
         placeInPlay(toSide, index, { id: movingId });
         return;
       }
@@ -1179,20 +1178,11 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
     const left = cx - w / 2;
     const [tx, ty] = LIFE_TRACK[value];
     const token = w * 0.16;
-    const btnStyle: React.CSSProperties = { width: ui.life + 6, height: ui.life + 6, fontSize: isTouch ? 26 : 22 };
+    const btnStyle: React.CSSProperties = compact ? { width: 54, height: 54, fontSize: 30 } : { width: ui.life + 6, height: ui.life + 6, fontSize: isTouch ? 26 : 22 };
     return (
       <React.Fragment key={`life-${side}`}>
         <div
-          title={mine && !compact ? undefined : `Vida: ${value}`}
-          onPointerDown={compact && mine ? (e) => e.stopPropagation() : undefined}
-          onClick={
-            compact && mine
-              ? () => {
-                  clearSelections();
-                  setLifeSel(side);
-                }
-              : undefined
-          }
+          title={mine ? undefined : `Vida: ${value}`}
           style={{
             position: 'absolute',
             left,
@@ -1202,8 +1192,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
             borderRadius: 14,
             overflow: 'hidden',
             zIndex: 50,
-            cursor: compact && mine ? 'pointer' : 'default',
-            boxShadow: lifeSel === side ? '0 0 0 4px var(--color-accent), 0 10px 25px rgba(0,0,0,0.5)' : '0 10px 25px rgba(0,0,0,0.5)',
+            boxShadow: '0 10px 25px rgba(0,0,0,0.5)',
           }}
         >
           <img src={tpl.imageUrl} alt={tpl.name} draggable={false} style={{ width: '100%', height: '100%', objectFit: 'cover', pointerEvents: 'none' }} />
@@ -1228,8 +1217,9 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
         <div style={{ ...pill, left: cx, top: top - 30, zIndex: 51 }}>
           {solo ? deckNameOf(side) || info?.name : info ? info.name : 'Esperando…'} · {value}
         </div>
-        {mine && !compact && (
-          <div style={{ position: 'absolute', left: cx, top: top + h + 8, transform: 'translateX(-50%)', display: 'flex', gap: 14, zIndex: 51 }}>
+        {/* + y − siempre debajo de la carta, también en el móvil */}
+        {mine && (
+          <div onPointerDown={(e) => e.stopPropagation()} style={{ position: 'absolute', left: cx, top: top + h + 8, transform: 'translateX(-50%)', display: 'flex', gap: compact ? 18 : 14, zIndex: 51 }}>
             <button className="life-counter-btn" style={btnStyle} onClick={() => setLife(side, value - 1)} disabled={value <= LIFE_MIN} title="Restar vida">
               −
             </button>

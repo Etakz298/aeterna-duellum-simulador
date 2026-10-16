@@ -29,6 +29,7 @@ export const OnlineMode: React.FC<OnlineModeProps> = ({ initialCode, localLibrar
   const [serverInput, setServerInput] = useState(serverUrl);
   const [name, setName] = useState(() => localStorage.getItem('online_name') || '');
   const [code, setCode] = useState(initialCode || '');
+  const joinFirst = code.trim().length > 0; // con código (p. ej. desde un enlace) se destaca Unirse
   const [library, setLibrary] = useState<ServerLibrary>(EMPTY_LIBRARY);
   const [libraryError, setLibraryError] = useState<string | null>(null);
 
@@ -303,7 +304,7 @@ export const OnlineMode: React.FC<OnlineModeProps> = ({ initialCode, localLibrar
                 : 'El servidor todavía no tiene mazos publicados.'}
         </div>
 
-        <button className="btn-primary" disabled={busy || !serverUrl || !!libraryError} onClick={handleCreate} style={{ padding: 12, fontSize: '0.95rem' }}>
+        <button className={joinFirst ? 'btn-secondary' : 'btn-primary'} disabled={busy || !serverUrl || !!libraryError} onClick={handleCreate} style={{ padding: 12, fontSize: '0.95rem' }}>
           <Plus size={16} /> Crear sala nueva
         </button>
 
@@ -318,7 +319,7 @@ export const OnlineMode: React.FC<OnlineModeProps> = ({ initialCode, localLibrar
               onChange={(e) => setCode(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleJoin()}
             />
-            <button className="btn-secondary" disabled={busy || !serverUrl || !!libraryError} onClick={handleJoin} style={{ padding: '8px 16px', fontSize: '0.9rem' }}>
+            <button className={joinFirst ? 'btn-primary' : 'btn-secondary'} disabled={busy || !serverUrl || !!libraryError} onClick={handleJoin} style={{ padding: '8px 16px', fontSize: '0.9rem' }}>
               <LogIn size={14} /> Unirse
             </button>
           </div>
