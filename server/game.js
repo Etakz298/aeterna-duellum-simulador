@@ -428,7 +428,9 @@ export class Game {
       const card = this.cards.get(msg.cardId);
       if (!card || card.zone !== 'play') throw new Error('Esa carta ya no está en juego');
       if (this.tokens.filter((t) => t.cardId === card.id).length >= 6) throw new Error('Esa carta ya tiene muchos tokens');
-      this.tokens.push({ id: randomId('token'), cardId: card.id });
+      // rx/ry: posición dentro de la carta (0-1), igual para los dos jugadores
+      const n = this.tokens.filter((t) => t.cardId === card.id).length;
+      this.tokens.push({ id: randomId('token'), cardId: card.id, rx: 0.8, ry: Math.min(0.9, 0.12 + n * 0.16) });
       this.addLog(`${this.nameOf(seat)} ha puesto un token en una carta.`);
       return;
     }
@@ -441,7 +443,13 @@ export class Game {
 
   act_tokenMove(seat, msg) {
     const t = this.tokens.find((k) => k.id === msg.id);
-    if (!t || t.cardId || !isNum(msg.x) || !isNum(msg.y)) return;
+    if (!t) return;
+    if (t.cardId) {
+      // Token de una carta: se mueve por encima de su carta
+      if (isNum(msg.rx) && isNum(msg.ry)) Object.assign(t, { rx: clamp(msg.rx, 0, 1), ry: clamp(msg.ry, 0, 1) });
+      return;
+    }
+    if (!isNum(msg.x) || !isNum(msg.y)) return;
     Object.assign(t, this.toP1(seat, msg.x, msg.y));
   }
 
