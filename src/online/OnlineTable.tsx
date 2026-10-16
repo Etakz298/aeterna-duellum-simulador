@@ -1182,6 +1182,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
     const btnStyle: React.CSSProperties = compact ? { width: 54, height: 54, fontSize: 30 } : { width: ui.life + 6, height: ui.life + 6, fontSize: isTouch ? 26 : 22 };
     return (
       <React.Fragment key={`life-${side}`}>
+        <LifeAura left={left} top={top} w={w} h={h} />
         <div
           title={mine ? undefined : `Vida: ${value}`}
           style={{
@@ -2386,3 +2387,29 @@ const Overlay: React.FC<{ onClose: () => void; children: React.ReactNode }> = ({
     </div>
   </div>
 );
+
+// Borde animado de la carta de vida: un brillo que gira y partículas que dan vueltas alrededor
+const AURA_PARTICLES = Array.from({ length: 28 }, (_, i) => ({
+  delay: -(i / 28) * 9 - (i % 3) * 0.37,
+  size: 4 + ((i * 7) % 5),
+  drift: ((i * 5) % 7) - 3,
+  twinkle: 1.2 + ((i * 3) % 5) * 0.3,
+}));
+
+function LifeAura({ left, top, w, h }: { left: number; top: number; w: number; h: number }) {
+  const m = 7; // separación entre la carta y el recorrido de las partículas
+  const W = w + m * 2;
+  const H = h + m * 2;
+  const r = 20;
+  const path = `path('M ${r} 0 H ${W - r} A ${r} ${r} 0 0 1 ${W} ${r} V ${H - r} A ${r} ${r} 0 0 1 ${W - r} ${H} H ${r} A ${r} ${r} 0 0 1 0 ${H - r} V ${r} A ${r} ${r} 0 0 1 ${r} 0 Z')`;
+  return (
+    <div className="ol-aura" style={{ left: left - m, top: top - m, width: W, height: H }}>
+      <div className="ol-aura-ring" />
+      {AURA_PARTICLES.map((p, i) => (
+        <span key={i} className="ol-aura-p" style={{ offsetPath: path, animationDelay: `${p.delay}s` } as React.CSSProperties}>
+          <i style={{ width: p.size, height: p.size, transform: `translateY(${p.drift}px)`, animationDuration: `${p.twinkle}s`, animationDelay: `${p.delay}s` }} />
+        </span>
+      ))}
+    </div>
+  );
+}
