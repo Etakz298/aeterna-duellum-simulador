@@ -48,6 +48,7 @@ export interface LogEntry {
   at: number;
   kind: 'event' | 'chat' | 'reveal';
   text: string;
+  by?: Seat; // quién escribió (mensajes de chat)
 }
 
 export interface OnlineToken {

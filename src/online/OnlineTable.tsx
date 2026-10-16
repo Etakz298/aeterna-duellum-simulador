@@ -140,6 +140,9 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
   const [showLog, setShowLog] = useState(false);
   const [chatText, setChatText] = useState('');
   const [seenLog, setSeenLog] = useState(state.log.length);
+  // Mensajes de chat del rival que aparecen en el lateral aunque el chat esté cerrado
+  const [chatToasts, setChatToasts] = useState<{ id: string; text: string; leaving?: boolean }[]>([]);
+  const lastChatId = useRef<string | undefined>(state.log[state.log.length - 1]?.id);
   const [hoverTemplate, setHoverTemplate] = useState<{ cardId: string; templateId: string } | null>(null);
   const [hoverHandId, setHoverHandId] = useState<string | null>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
@@ -1399,6 +1402,25 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
     setChatText('');
   };
 
+  useEffect(() => {
+    const log = state.log;
+    const from = lastChatId.current ? log.findIndex((e) => e.id === lastChatId.current) + 1 : 0;
+    lastChatId.current = log[log.length - 1]?.id;
+    if (solo || showLog) return;
+    const fresh = log.slice(from).filter((e) => e.kind === 'chat' && e.by && e.by !== state.you);
+    if (!fresh.length) return;
+    playChatSound();
+    setChatToasts((prev) => [...prev, ...fresh.map((e) => ({ id: e.id, text: e.text }))].slice(-3));
+    for (const e of fresh) {
+      window.setTimeout(() => setChatToasts((prev) => prev.map((t) => (t.id === e.id ? { ...t, leaving: true } : t))), 5000);
+      window.setTimeout(() => setChatToasts((prev) => prev.filter((t) => t.id !== e.id)), 5400);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.log]);
+  useEffect(() => {
+    if (showLog) setChatToasts([]);
+  }, [showLog]);
+
   const handRevealed = !!myInfo?.handRevealed;
   const myCardsInGame = state.me.library.count + state.hand.length + state.me.graveyard.length + state.me.play.length > 0;
   const unread = showLog ? 0 : Math.max(0, state.log.length - seenLog);
@@ -2004,6 +2026,22 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
           </div>
         )}
 
+        {/* Avisos de chat del rival: entran por la derecha y se van solos */}
+        {chatToasts.length > 0 && (
+          <div style={{ position: 'absolute', right: 12, top: compact ? 64 : 90, display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-end', zIndex: 760000, pointerEvents: 'none' }}>
+            {chatToasts.map((t) => (
+              <div
+                key={t.id}
+                className={`glass-panel ol-chat-toast${t.leaving ? ' ol-chat-toast-out' : ''}`}
+                style={{ maxWidth: compact ? 260 : 340, padding: '10px 14px', fontSize: compact ? 14 : 15, display: 'flex', gap: 8, alignItems: 'flex-start', boxShadow: '0 10px 30px rgba(0,0,0,0.5)' }}
+              >
+                <MessageSquare size={16} style={{ flexShrink: 0, marginTop: 2, color: 'var(--color-accent)' }} />
+                <span style={{ wordBreak: 'break-word' }}>{t.text}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
         {status === 'reconnecting' && (
           <div
             className="glass-panel"
@@ -2171,6 +2209,34 @@ const imgStyle: React.CSSProperties = {
   display: 'block',
   pointerEvents: 'none',
 };
+
+// Sonido suave al recibir un mensaje (dos notas cortas, sin archivos de audio)
+let chatAudio: AudioContext | null = null;
+function playChatSound() {
+  try {
+    const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!Ctx) return;
+    chatAudio = chatAudio || new Ctx();
+    const ctx = chatAudio;
+    if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+    const now = ctx.currentTime;
+    [880, 1318.5].forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      const t0 = now + i * 0.12;
+      gain.gain.setValueAtTime(0, t0);
+      gain.gain.linearRampToValueAtTime(0.08, t0 + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.35);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(t0);
+      osc.stop(t0 + 0.4);
+    });
+  } catch {
+    // sin sonido si el navegador no lo permite
+  }
+}
 
 const pill: React.CSSProperties = {
   position: 'absolute',

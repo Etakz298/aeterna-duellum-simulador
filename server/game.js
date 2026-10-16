@@ -86,8 +86,8 @@ export class Game {
     return this.players[seat]?.name || seat;
   }
 
-  addLog(text, kind = 'event') {
-    this.log.push({ id: randomId('log'), at: Date.now(), kind, text });
+  addLog(text, kind = 'event', by) {
+    this.log.push({ id: randomId('log'), at: Date.now(), kind, text, ...(by ? { by } : {}) });
     if (this.log.length > LOG_LIMIT) this.log.splice(0, this.log.length - LOG_LIMIT);
   }
 
@@ -496,6 +496,6 @@ export class Game {
   act_chat(seat, msg) {
     const text = String(msg.text || '').trim().slice(0, 300);
     if (!text) return;
-    this.addLog(`${this.nameOf(seat)}: ${text}`, 'chat');
+    this.addLog(`${this.nameOf(seat)}: ${text}`, 'chat', seat);
   }
 }
