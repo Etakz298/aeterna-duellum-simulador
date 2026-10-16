@@ -67,7 +67,7 @@ function persist(g: any) {
 // Vista desde el Jugador 1 (abajo) con la mano del Jugador 2 visible y con ids
 function viewOf(g: any): OnlineState {
   const v = g.viewFor('p1') as OnlineState;
-  v.oppHand = g.zoneCards('p2', 'hand').map((c: any) => ({ id: c.id, templateId: c.templateId, deckId: c.deckId, backType: c.backType }));
+  v.oppHand = g.zoneCards('p2', 'hand').map((c: any) => ({ id: c.id, templateId: c.templateId, deckId: c.deckId, backType: c.backType, isSpecial: !!c.isSpecial }));
   return v;
 }
 

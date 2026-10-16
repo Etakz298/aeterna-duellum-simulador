@@ -147,10 +147,9 @@ export class Game {
       const top = library[library.length - 1];
       const hand = this.zoneCards(side, 'hand');
       return {
-        // La carta Especial (guía de habilidades) la pueden ver los dos jugadores esté donde esté
-        library: { count: library.length, top: top ? { deckId: top.deckId, backType: top.backType, ...(top.isSpecial ? { templateId: top.templateId } : {}) } : null },
-        // El cementerio está boca abajo: solo se envía el reverso (salvo la Especial)
-        graveyard: this.zoneCards(side, 'graveyard').map((c) => ({ id: c.id, deckId: c.deckId, backType: c.backType, ...(c.isSpecial ? { templateId: c.templateId } : {}) })),
+        library: { count: library.length, top: top ? { deckId: top.deckId, backType: top.backType } : null },
+        // El cementerio está boca abajo: solo se envía el reverso (también la Especial)
+        graveyard: this.zoneCards(side, 'graveyard').map((c) => ({ id: c.id, deckId: c.deckId, backType: c.backType })),
         play: this.zoneCards(side, 'play').map((c) => {
           const v = { id: c.id, owner: c.owner, deckId: c.deckId, backType: c.backType, x: c.x, y: c.y, isFaceUp: c.isFaceUp, rotation: c.rotation, order: c.order };
           if (c.isFaceUp || c.isSpecial) v.templateId = c.templateId;
@@ -180,10 +179,15 @@ export class Game {
       })(),
       me: sideView(seat),
       opp: sideView(opp),
-      hand: this.zoneCards(seat, 'hand').map((c) => ({ id: c.id, templateId: c.templateId, deckId: c.deckId, backType: c.backType })),
+      hand: this.zoneCards(seat, 'hand').map((c) => ({ id: c.id, templateId: c.templateId, deckId: c.deckId, backType: c.backType, ...(c.isSpecial ? { isSpecial: true } : {}) })),
       // La mano del rival solo se ve si él ha decidido enseñarla
       oppHand: this.zoneCards(opp, 'hand').map((c) =>
-        this.players[opp]?.handRevealed || c.isSpecial ? { deckId: c.deckId, backType: c.backType, templateId: c.templateId } : { deckId: c.deckId, backType: c.backType },
+        // La carta Especial (guía de habilidades) se ve en la mano del rival en su hueco reservado
+        c.isSpecial
+          ? { deckId: c.deckId, backType: c.backType, templateId: c.templateId, isSpecial: true }
+          : this.players[opp]?.handRevealed
+            ? { deckId: c.deckId, backType: c.backType, templateId: c.templateId }
+            : { deckId: c.deckId, backType: c.backType },
       ),
       life: { me: this.life[seat], opp: this.life[opp] },
       // Los tokens se guardan vistos por p1; a p2 se le dan girados 180º
@@ -251,6 +255,8 @@ export class Game {
       }
     }
     this.shuffleLibrary(seat);
+    // La Especial empieza en su hueco de la mano
+    for (const c of [...this.cards.values()].filter((k) => k.owner === seat && k.isSpecial)) this.place(c, seat, 'hand');
     this.addLog(`${this.nameOf(seat)} juega con el mazo "${library.deckNames[deckId] || deckId}" (${n} cartas, barajado).`);
   }
 
