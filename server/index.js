@@ -175,6 +175,17 @@ async function handleHttp(req, res) {
 
   if (pathname === '/api/results' && req.method === 'GET') return sendJson(res, 200, { results });
 
+  // Mensajes de voz de una sala (solo los conoce quien tiene el código de la sala)
+  if (pathname === '/api/audio' && req.method === 'GET') {
+    const room = rooms.get(String(url.searchParams.get('room') || '').toUpperCase());
+    const clip = room?.audios?.get(String(url.searchParams.get('id') || ''));
+    if (!clip) return sendJson(res, 404, { error: 'No existe ese audio.' });
+    cors(res);
+    res.writeHead(200, { 'Content-Type': clip.mime, 'Content-Length': clip.data.length, 'Cache-Control': 'private, max-age=86400' });
+    res.end(clip.data);
+    return;
+  }
+
   if (pathname === '/api/library' && req.method === 'GET') {
     return sendJson(res, 200, publicLibrary());
   }
@@ -308,7 +319,29 @@ function attach(ws, room, seat) {
   ws.seat = seat;
 }
 
-const wss = new WebSocketServer({ server, maxPayload: 256 * 1024 });
+// Mensaje de voz: el audio se guarda aparte (los últimos de la sala) y en el chat solo va su ficha
+const VOICE_MAX_SECONDS = 60;
+const VOICE_MAX_BYTES = 700 * 1024;
+const VOICE_KEEP = 40;
+function receiveVoice(room, seat, msg) {
+  const m = /^data:(audio\/[\w.+-]+)(?:;[^,]*)?;base64,(.+)$/.exec(String(msg.data || ''));
+  if (!m) throw new Error('Audio no válido.');
+  const data = Buffer.from(m[2], 'base64');
+  if (!data.length || data.length > VOICE_MAX_BYTES) throw new Error('El audio es demasiado largo.');
+  const dur = Math.max(0.1, Math.min(VOICE_MAX_SECONDS, Number(msg.dur) || 0));
+  const wave = (Array.isArray(msg.wave) ? msg.wave : []).slice(0, 64).map((v) => Math.max(0, Math.min(1, Number(v) || 0)));
+  const id = crypto.randomUUID();
+  room.audios = room.audios || new Map();
+  room.audios.set(id, { mime: m[1], data });
+  while (room.audios.size > VOICE_KEEP) room.audios.delete(room.audios.keys().next().value);
+  const game = room.game;
+  game.addLog(`${game.nameOf(seat)}: mensaje de voz`, 'chat', seat);
+  game.log[game.log.length - 1].audio = { id, dur: Math.round(dur * 10) / 10, wave };
+  game.bump();
+  broadcastState(room);
+}
+
+const wss = new WebSocketServer({ server, maxPayload: 1024 * 1024 });
 
 wss.on('connection', (ws) => {
   ws.isAlive = true;
@@ -380,6 +413,15 @@ wss.on('connection', (ws) => {
         if (SEATS.every((s) => !game.players[s] || game.players[s].left)) rooms.delete(game.code);
         else broadcastState(room);
         ws.close();
+        return;
+      }
+      if (msg.t === 'voice') return receiveVoice(room, ws.seat, msg);
+      if (msg.t === 'voiceHeard') {
+        const entry = room.game.log.find((e) => e.audio && e.audio.id === msg.id);
+        if (!entry || entry.by === ws.seat || entry.audio.heard) return;
+        entry.audio.heard = true;
+        room.game.bump();
+        broadcastState(room);
         return;
       }
       const result = room.game.apply(ws.seat, msg, library);
