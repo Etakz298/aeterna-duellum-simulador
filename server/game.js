@@ -63,6 +63,7 @@ export class Game {
     this.tokens = []; // { id, x, y } en coordenadas del tablero vistas por p1
     // Quién juega el primer turno: al azar al crear la sala; cambia al terminar una partida
     this.starter = webcrypto.getRandomValues(new Uint8Array(1))[0] % 2 ? 'p2' : 'p1';
+    this.started = false; // se ha jugado alguna carta en esta partida (oculta quién empieza)
     this.seq = 0;
     this.log = [];
     this.rev = 0;
@@ -175,6 +176,7 @@ export class Game {
       rev: this.rev,
       players,
       starter: this.starter,
+      started: this.started,
       me: sideView(seat),
       opp: sideView(opp),
       hand: this.zoneCards(seat, 'hand').map((c) => ({ id: c.id, templateId: c.templateId, deckId: c.deckId, backType: c.backType })),
@@ -290,6 +292,7 @@ export class Game {
       card.isFaceUp = false;
       card.rotation = -90;
     } else if (zone === 'play') {
+      this.started = true;
       card.x = clamp(isNum(opts.x) ? opts.x : (PLAY_W - CARD_W) / 2, 0, PLAY_W - CARD_W);
       card.y = clamp(isNum(opts.y) ? opts.y : (PLAY_H - CARD_H) / 2, 0, PLAY_H - CARD_H);
       if (typeof opts.faceUp === 'boolean') card.isFaceUp = opts.faceUp;
@@ -525,16 +528,23 @@ export class Game {
     );
     // La siguiente partida la empieza el otro jugador
     this.starter = other(this.starter || 'p1');
+    this.started = false;
     if (msg.reset) this.act_reset(seat);
     return { result, fx: { matchEnded: result } };
   }
 
   act_reset(seat) {
-    for (const s of SEATS) if (this.players[s]) this.players[s].handRevealed = false;
+    for (const s of SEATS) {
+      if (!this.players[s]) continue;
+      this.players[s].handRevealed = false;
+      // En una sala online cada jugador vuelve a elegir campeón
+      if (!this.free) this.players[s].deckId = null;
+    }
+    this.started = false;
     this.cards.clear();
     this.tokens = [];
     this.life = { p1: LIFE_START, p2: LIFE_START };
-    this.addLog(`${this.nameOf(seat)} ha reiniciado la mesa (sin cartas ni tokens, vidas a ${LIFE_START}).`);
+    this.addLog(`${this.nameOf(seat)} ha reiniciado la mesa (sin cartas ni tokens, vidas a ${LIFE_START}${this.free ? "" : "; cada jugador vuelve a elegir campeón"}).`);
   }
 
   // Los jugadores pueden decidir entre ellos quién empieza
