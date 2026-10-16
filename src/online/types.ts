@@ -55,6 +55,8 @@ export interface OnlineToken {
   x?: number;
   y?: number;
   cardId?: string; // token fijado a una carta en juego
+  rx?: number; // posición dentro de esa carta (0-1)
+  ry?: number;
 }
 
 export interface OnlineState {

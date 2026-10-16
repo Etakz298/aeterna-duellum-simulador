@@ -79,7 +79,7 @@ type DragSource =
   | { kind: 'library'; back: CardBackInfo; side: SideKey }
   | { kind: 'play'; id: string; side: SideKey; card: OnlinePlayCard }
   | { kind: 'graveyard'; id: string; side: SideKey; back: CardBackInfo }
-  | { kind: 'token'; id: string }
+  | { kind: 'token'; id: string; cardId?: string }
   | { kind: 'view' }; // solo para ampliar con el dedo (mano del rival enseñada)
 
 interface DragState {
@@ -364,6 +364,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
   // Las cartas en juego se colocan en fila, alineadas y centradas. La x guardada
   // solo sirve para el orden (de izquierda a derecha vista por el dueño).
   const PLAY_MAX_X = PLAY_W - CARD_W;
+  const attachedTokenSize = TOKEN_SIZE * (compact ? 0.8 : 0.75);
   const PLAY_MID_Y = (PLAY_H - CARD_H) / 2;
   // ¿Esta zona se ve girada (orden de derecha a izquierda)?
   const mirroredPlay = (side: SideKey) => L.playCardPos(side, 0, 0).x > L.playCardPos(side, 100, 0).x;
@@ -530,6 +531,17 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
       };
     }
 
+    if (src.kind === 'token' && src.cardId) {
+      // Token de una carta: se queda dentro de la carta, donde se suelte
+      const slot = playLayout.get(src.cardId);
+      if (!slot) return;
+      const size = attachedTokenSize;
+      const rx = clamp((left + size / 2 - slot.x) / L.cardW, 0, 1);
+      const ry = clamp((top + size / 2 - slot.y) / L.cardH, 0, 1);
+      patchState((s) => ({ ...s, tokens: s.tokens.map((t) => (t.id === src.id ? { ...t, rx, ry } : t)) }));
+      send({ t: 'tokenMove', id: src.id, rx, ry });
+      return;
+    }
     if (src.kind === 'token') {
       const { x, y } = L.fromView(clamp(left, 0, BOARD_W - TOKEN_SIZE), clamp(top, 0, L.boardH - TOKEN_SIZE));
       patchState((s) => ({ ...s, tokens: s.tokens.map((t) => (t.id === src.id ? { ...t, x, y } : t)) }));
@@ -856,7 +868,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
             top: pos.y,
             width: L.cardW,
             height: L.cardH,
-            zIndex: 20 + (slot?.slot ?? 0),
+            zIndex: 20 + (slot?.slot ?? 0) * 2,
             cursor: 'grab',
             opacity: isDragged('play', c.id) ? 0.25 : 1,
           }}
@@ -1247,7 +1259,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
     );
   };
 
-  // Tokens fijados a una carta: en su esquina, uno debajo de otro
+  // Tokens fijados a una carta: se mueven por encima de ella y van justo sobre su capa
   const attachedIndex = new Map<string, number>();
   const tokens = state.tokens.map((t) => {
     if (t.cardId) {
@@ -1255,36 +1267,43 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
       if (!slot) return null;
       const k = attachedIndex.get(t.cardId) ?? 0;
       attachedIndex.set(t.cardId, k + 1);
-      const size = TOKEN_SIZE * (compact ? 0.8 : 0.75);
+      const size = attachedTokenSize;
+      const rx = t.rx ?? 0.8;
+      const ry = t.ry ?? Math.min(0.9, 0.12 + k * 0.16);
+      const dragging = drag && drag.moved && drag.src.kind === 'token' && drag.src.id === t.id;
+      // Mientras se arrastra no sale de su carta
+      const x = dragging ? clamp(drag.x - drag.grabX, slot.x - size / 2, slot.x + L.cardW - size / 2) : slot.x + rx * L.cardW - size / 2;
+      const y = dragging ? clamp(drag.y - drag.grabY, slot.y - size / 2, slot.y + L.cardH - size / 2) : slot.y + ry * L.cardH - size / 2;
       return (
         <div
           key={t.id}
-          title="Token de la carta · toca para quitarlo"
-          onPointerDown={(e) => {
-            e.stopPropagation();
-            const was = selectedTokenId;
-            clearSelections();
-            setSelectedTokenId(was === t.id ? null : t.id);
-          }}
+          title="Token de la carta · arrastrar para moverlo · toca para quitarlo"
+          onPointerDown={(e) => startDrag(e, { kind: 'token', id: t.id, cardId: t.cardId }, x, y)}
           onDoubleClick={() => send({ t: 'tokenDelete', id: t.id })}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            send({ t: 'tokenDelete', id: t.id });
+          }}
           style={{
             position: 'absolute',
-            left: slot.x + L.cardW - size * 0.75,
-            top: slot.y - size * 0.25 + k * size * 0.8,
+            left: x,
+            top: y,
             width: size,
             height: size,
             borderRadius: '50%',
             background: '#facc15',
             border: '3px solid #000',
-            boxShadow: '0 4px 10px rgba(0,0,0,0.6)',
-            transition: 'left 0.35s cubic-bezier(0.25, 0.8, 0.25, 1), top 0.35s cubic-bezier(0.25, 0.8, 0.25, 1)',
-            cursor: 'pointer',
-            zIndex: 400000,
+            boxShadow: dragging ? '0 10px 18px rgba(0,0,0,0.6)' : '0 4px 10px rgba(0,0,0,0.6)',
+            transform: dragging ? 'scale(1.15)' : 'none',
+            transition: dragging ? 'transform 0.15s' : 'left 0.35s cubic-bezier(0.25, 0.8, 0.25, 1), top 0.35s cubic-bezier(0.25, 0.8, 0.25, 1), transform 0.15s',
+            cursor: 'grab',
+            // Justo encima de su carta: otra carta que se le ponga encima lo tapa
+            zIndex: dragging ? 500000 : 21 + slot.slot * 2,
             outline: selectedTokenId === t.id ? '3px solid var(--color-accent)' : 'none',
             outlineOffset: 3,
           }}
         >
-          {selectedTokenId === t.id && !compact && (
+          {selectedTokenId === t.id && !compact && !dragging && (
             <button
               className="btn-danger"
               title="Quitar token"
