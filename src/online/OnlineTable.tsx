@@ -155,6 +155,9 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
   const isTouch = useMemo(() => typeof window !== 'undefined' && !!window.matchMedia?.('(pointer: coarse)').matches, []);
   const [pressPreview, setPressPreview] = useState<string | null>(null);
   const [pickClosed, setPickClosed] = useState(false); // menú de elegir campeón cerrado a mano
+  useEffect(() => {
+    if (!myInfo?.deckId) setPickClosed(false); // al reiniciar la partida se vuelve a preguntar
+  }, [myInfo?.deckId]);
   const [previewBig, setPreviewBig] = useState(false); // vista previa tocada: a pantalla grande
   const pressTimer = useRef<number | undefined>(undefined);
   const [selectedHandId, setSelectedHandId] = useState<string | null>(null);
@@ -173,6 +176,23 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
   const zoneRect = L.zoneRect;
   const [menuOpen, setMenuOpen] = useState(false);
   const [lifeSel, setLifeSel] = useState<SideKey | null>(null);
+  const [lifePending, setLifePending] = useState<Partial<Record<SideKey, { value: number; at: number }>>>({});
+  const [lifeBig, setLifeBig] = useState<SideKey | null>(null); // carta de vida ampliada
+  useEffect(() => {
+    // Se suelta el valor pendiente cuando el servidor ya lo tiene (o si tarda demasiado)
+    setLifePending((p) => {
+      let changed = false;
+      const next = { ...p };
+      for (const side of ['me', 'opp'] as SideKey[]) {
+        const v = p[side];
+        if (v && (v.value === state.life[side] || Date.now() - v.at > 3000)) {
+          delete next[side];
+          changed = true;
+        }
+      }
+      return changed ? next : p;
+    });
+  }, [state.life]);
   const fullscreen = useIsFullscreen();
   const ui = compact
     ? { font: 15, pad: '8px 10px', icon: 16, pile: 40, life: 36 }
@@ -517,10 +537,17 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
     sendAs(selectedSide, { t: 'move', id: selectedCard.id, to });
     setSelectedId(null);
   };
+  // Al tocar rápido +/− el servidor responde con valores intermedios ya viejos: se muestra el último
+  // valor pulsado hasta que el servidor lo confirma, así el contador no salta hacia atrás y hacia delante
   const setLife = (side: SideKey, value: number) => {
     const v = clamp(value, LIFE_MIN, LIFE_MAX);
+    setLifePending((p) => ({ ...p, [side]: { value: v, at: Date.now() } }));
     patchState((s) => ({ ...s, life: { ...s.life, [side]: v } }));
     sendAs(side, { t: 'life', value: v });
+  };
+  const lifeOf = (side: SideKey) => {
+    const p = lifePending[side];
+    return p ? p.value : side === 'me' ? state.life.me : state.life.opp;
   };
   // Enseñar la mano pide confirmación; ocultarla no
   const toggleHand = () => {
@@ -1175,7 +1202,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
   };
   const lifeCard = (side: SideKey, tpl: CardTemplate) => {
     const mine = canControl(side);
-    const value = clamp(side === 'me' ? state.life.me : state.life.opp, LIFE_MIN, LIFE_MAX);
+    const value = clamp(lifeOf(side), LIFE_MIN, LIFE_MAX);
     const info = side === 'me' ? myInfo : oppInfo;
     const h = compact ? 226 : 300;
     const w = h * LIFE_CARD_RATIO;
@@ -1191,6 +1218,8 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
         <LifeAura left={left} top={top} w={w} h={h} color={(side === 'me' ? myBackColor : oppBackColor) || '#facc15'} />
         <div
           title={mine ? undefined : `Vida: ${value}`}
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={() => setLifeBig(side)}
           style={{
             position: 'absolute',
             left,
@@ -1200,6 +1229,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
             borderRadius: 14,
             overflow: 'hidden',
             zIndex: 50,
+            cursor: 'zoom-in',
             boxShadow: '0 10px 25px rgba(0,0,0,0.5)',
           }}
         >
@@ -1217,7 +1247,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
               border: '3px solid #000',
               boxShadow: '0 6px 12px rgba(0,0,0,0.55)',
               opacity: 0.92,
-              transition: 'left 0.5s cubic-bezier(0.34, 1.3, 0.64, 1), top 0.5s cubic-bezier(0.34, 1.3, 0.64, 1)',
+              transition: 'left 0.3s ease-out, top 0.3s ease-out',
               pointerEvents: 'none',
             }}
           />
@@ -1246,7 +1276,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
     const lifeTpl = lifeTemplateOf(side);
     if (lifeTpl) return lifeCard(side, lifeTpl);
     const mine = canControl(side);
-    const value = side === 'me' ? state.life.me : state.life.opp;
+    const value = lifeOf(side);
     const info = side === 'me' ? myInfo : oppInfo;
     const size = 190;
     const cx = side === 'me' ? SIDE_W / 2 : BOARD_W - SIDE_W / 2;
@@ -1486,7 +1516,6 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
   }, [showLog]);
 
   const handRevealed = !!myInfo?.handRevealed;
-  const myCardsInGame = state.me.library.count + state.hand.length + state.me.graveyard.length + state.me.play.length > 0;
   // Solo cuentan los mensajes del rival sin leer
   const unread = showLog ? 0 : state.log.filter((e) => e.kind === 'chat' && e.by && e.by !== state.you && !seenChat.has(e.id)).length;
   const btn: React.CSSProperties = { padding: ui.pad, fontSize: ui.font };
@@ -1632,37 +1661,6 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
       )}
       <div style={{ height: 1, background: 'var(--glass-border)' }} />
       <div style={{ display: 'flex', gap: 6 }}>
-        <select
-          value={myInfo?.deckId || ''}
-          onChange={(e) => pickDeck('me', e.target.value)}
-          style={{
-            flex: 1,
-            minWidth: 0,
-            background: 'rgba(0,0,0,0.35)',
-            color: '#fff',
-            border: '1px solid var(--glass-border)',
-            borderRadius: 6,
-            padding: 7,
-            fontSize: 14,
-            fontFamily: 'var(--font-family)',
-          }}
-        >
-          <option value="" disabled>
-            {Object.keys(library.deckNames).length ? 'Elige tu mazo…' : 'No hay mazos publicados'}
-          </option>
-          {Object.entries(library.deckNames).map(([id, name]) => (
-            // Cada jugador con un mazo distinto: el del rival no se puede elegir
-            <option key={id} value={id} disabled={!!oppInfo?.deckId && oppInfo.deckId === id}>
-              {name} ({library.templates.filter((t) => t.deckId === id && !t.isLife).reduce((s, t) => s + (t.quantity || 1), 0)})
-              {oppInfo?.deckId === id ? ' · lo usa tu rival' : ''}
-            </option>
-          ))}
-        </select>
-        <button className="btn-secondary" data-keep onClick={onReloadLibrary} title="Recargar mazos del servidor" style={{ padding: '6px 9px' }}>
-          <RefreshCw size={14} />
-        </button>
-      </div>
-      <div style={{ display: 'flex', gap: 6 }}>
         <button className="btn-primary" onClick={() => setShowEnd(true)} disabled={!oppInfo} style={{ ...btn, flex: 1, opacity: oppInfo ? 1 : 0.5 }} title="Registrar quién ha ganado">
           <Trophy size={14} /> Terminar partida
         </button>
@@ -1799,7 +1797,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
         </button>
       );
     } else if (lifeSel) {
-      const value = lifeSel === 'me' ? state.life.me : state.life.opp;
+      const value = lifeOf(lifeSel);
       barTitle = solo ? `Vida de ${deckNameOf(lifeSel) || sideName(lifeSel)}` : 'Tu vida';
       barContent = (
         <>
@@ -1875,7 +1873,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
             </div>
           )}
           {/* Quién empieza el primer turno; pulsarlo cambia al otro jugador */}
-          {!solo && state.starter && oppInfo && state.me.play.length + state.opp.play.length === 0 && (() => {
+          {!solo && state.starter && oppInfo && !state.started && (() => {
             const mine = state.starter === me;
             const top = (zoneRect('opp', 'play').y + zoneRect('opp', 'play').h + zoneRect('me', 'play').y) / 2;
             return (
@@ -1908,9 +1906,11 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
               </button>
             );
           })()}
-          {!solo && !myCardsInGame && (
-            <div style={{ position: 'absolute', left: SIDE_W, top: zoneRect('me', 'play').y + zoneRect('me', 'play').h * 0.4, width: PLAY_W, textAlign: 'center', color: 'rgba(255,255,255,0.4)', fontSize: 22, pointerEvents: 'none' }}>
-              {compact ? 'Elige tu mazo en el menú para empezar' : 'Elige tu mazo en el panel de la sala para empezar'}
+          {!solo && !myInfo?.deckId && (
+            <div style={{ position: 'absolute', left: SIDE_W, top: zoneRect('me', 'play').y + zoneRect('me', 'play').h * 0.4, width: PLAY_W, textAlign: 'center', zIndex: 300 }}>
+              <button className="btn-primary" onPointerDown={(e) => e.stopPropagation()} onClick={() => setPickClosed(false)} style={{ fontSize: compact ? 24 : 18, padding: '10px 22px' }}>
+                Elegir campeón
+              </button>
             </div>
           )}
         </div>
@@ -1976,6 +1976,41 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
           </div>
         )}
 
+        {/* Carta de vida ampliada (con su token); otro toque la cierra */}
+        {lifeBig && (() => {
+          const tpl = lifeTemplateOf(lifeBig);
+          if (!tpl?.imageUrl) return null;
+          const [tx, ty] = LIFE_TRACK[clamp(lifeOf(lifeBig), LIFE_MIN, LIFE_MAX)];
+          return (
+            <div
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={() => setLifeBig(null)}
+              style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 700500, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            >
+              <div
+                className="ol-preview-big ol-life-big"
+                style={{ position: 'relative', height: 'calc(100% - 16px)', maxWidth: 'calc(100% - 16px)', aspectRatio: `${LIFE_CARD_RATIO}`, borderRadius: 18, overflow: 'hidden', boxShadow: '0 20px 60px rgba(0,0,0,0.9)' }}
+              >
+                <img src={tpl.imageUrl} alt={tpl.name} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                <div
+                  style={{
+                    position: 'absolute',
+                    left: `${(tx - 0.08) * 100}%`,
+                    top: `calc(${ty * 100}% - ${8 * LIFE_CARD_RATIO}%)`,
+                    width: '16%',
+                    aspectRatio: '1',
+                    borderRadius: '50%',
+                    background: 'radial-gradient(circle at 35% 30%, #fde68a, #facc15 55%, #ca8a04)',
+                    border: '4px solid #000',
+                    boxShadow: '0 8px 16px rgba(0,0,0,0.55)',
+                    opacity: 0.92,
+                    transition: 'left 0.3s ease-out, top 0.3s ease-out',
+                  }}
+                />
+              </div>
+            </div>
+          );
+        })()}
         {/* Vista ampliada de la carta tocada, a pantalla grande para leerla bien; otro toque la cierra */}
         {previewBig && pressPreview && previewTemplate?.imageUrl && (
           <div
@@ -2188,7 +2223,12 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
       {!solo && !myInfo?.deckId && !pickClosed && Object.keys(library.deckNames).length > 0 && (
         <Overlay onClose={() => setPickClosed(true)}>
           <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: 4 }}>Elige tu campeón</h3>
-          <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 14 }}>Tu mazo se pondrá barajado y listo para empezar.</p>
+          <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 14 }}>
+            Tu mazo se pondrá barajado y listo para empezar.{' '}
+            <button className="btn-secondary" onClick={onReloadLibrary} title="Recargar mazos del servidor" style={{ padding: '2px 8px', fontSize: 12, verticalAlign: 'middle' }}>
+              <RefreshCw size={12} /> Recargar
+            </button>
+          </p>
           <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap', maxHeight: compact ? 'calc(var(--app-h, 100vh) - 150px)' : '70vh', overflowY: 'auto' }}>
             {Object.entries(library.deckNames).map(([id, name]) => {
               const tpls = library.templates.filter((t) => t.deckId === id);
