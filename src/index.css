@@ -660,8 +660,3 @@ html.rot-landscape #root {
   0%, 100% { transform: scale(1); }
   50% { transform: scale(1.12); }
 }
-.ol-point-src { animation: olPointPulse 1.1s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
-@keyframes olPointPulse {
-  0%, 100% { opacity: 0.9; transform: scale(1); }
-  50% { opacity: 0.35; transform: scale(1.12); }
-}

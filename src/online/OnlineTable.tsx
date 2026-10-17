@@ -2110,20 +2110,28 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
   // Flechas de "señalar": trazos como hechos a mano, de la carta que señala a la parte baja de cada objetivo
   const pointerArrows = () => {
     const p = pointer && pointer.rev !== hiddenPointRev ? pointer : null;
-    const src = pointing ? playLayout.get(pointing.from) : null;
-    if (!p && !src) return null;
-    const color = (p ? (p.by === seatOf('me') ? myBackColor : oppBackColor) : myBackColor) || '#ef4444';
+    if (!p) return null;
+    const color = (p.by === seatOf('me') ? myBackColor : oppBackColor) || '#ef4444';
     const arrows: (BrushArrow & { key: string })[] = [];
-    if (p) {
+    {
       const a = playLayout.get(p.from);
       if (a)
         for (const t of p.targets) {
           const b = playLayout.get(t);
           if (!b) continue;
-          // Mismo dibujo para los dos jugadores: el azar sale de las cartas implicadas
-          const rand = seededRandom(`${p.rev}:${p.from}:${t}`);
+          // Mismo dibujo para los dos jugadores y siempre igual para esta pareja de cartas
+          // (añadir otro objetivo no cambia las flechas que ya estaban)
+          const rand = seededRandom(`${p.from}:${t}`);
           const from = { x: a.x + L.cardW * (0.4 + rand() * 0.2), y: a.y + L.cardH * (0.42 + rand() * 0.16) };
-          const to = { x: b.x + L.cardW * (0.35 + rand() * 0.3), y: b.y + L.cardH * (0.8 + rand() * 0.08) };
+          // La punta se queda justo fuera del borde que mira hacia la carta de origen,
+          // para no tapar las habilidades de la parte de abajo de la carta
+          const gap = 4;
+          const ax = a.x + L.cardW / 2;
+          const ay = a.y + L.cardH / 2;
+          const to =
+            Math.abs(ay - (b.y + L.cardH / 2)) > L.cardH * 0.6
+              ? { x: b.x + L.cardW * (0.3 + rand() * 0.4), y: ay > b.y + L.cardH / 2 ? b.y + L.cardH + gap : b.y - gap }
+              : { x: ax > b.x + L.cardW / 2 ? b.x + L.cardW + gap : b.x - gap, y: b.y + L.cardH * (0.3 + rand() * 0.2) };
           arrows.push({ key: `${p.from}-${t}`, ...brushArrow(from, to, rand, L.cardH) });
         }
     }
@@ -2134,9 +2142,6 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
             <feDropShadow dx="0" dy="4" stdDeviation="4" floodColor="#000" floodOpacity="0.6" />
           </filter>
         </defs>
-        {src && pointing && (
-          <circle className="ol-point-src" cx={src.x + L.cardW / 2} cy={src.y + L.cardH / 2} r={L.cardH * 0.36} fill="none" stroke="currentColor" strokeWidth={5} strokeDasharray="14 10" />
-        )}
         {arrows.map((a) => (
           <g key={a.key} filter="url(#ol-arrow-shadow)">
             <mask id={`ol-mask-${a.key}`} maskUnits="userSpaceOnUse">
@@ -2996,15 +3001,22 @@ function brushArrow(from: Pt, to: Pt, rand: () => number, scale: number): BrushA
     };
   };
   const N = 36;
-  const pts = Array.from({ length: N + 1 }, (_, i) => at(i / N));
+  const curve = Array.from({ length: N + 1 }, (_, i) => at(i / N));
+  // El tronco sigue un poco por dentro de la punta para que no se vean separados
+  const tail = curve[N];
+  const pre = curve[N - 2];
+  const tl0 = Math.hypot(tail.x - pre.x, tail.y - pre.y) || 1;
+  const ext = (k: number) => ({ x: tail.x + ((tail.x - pre.x) / tl0) * headLen * k, y: tail.y + ((tail.y - pre.y) / tl0) * headLen * k });
+  const pts = [...curve, ext(0.25), ext(0.5)];
+  const M = pts.length - 1;
   const wobble = [rand() * 6, rand() * 6, 2 + rand() * 2];
   const maxW = Math.max(7, Math.min(13, scale * 0.07));
   const left: Pt[] = [];
   const right: Pt[] = [];
   pts.forEach((pt, i) => {
-    const t = i / N;
+    const t = Math.min(1, i / N);
     const prev = pts[Math.max(0, i - 1)];
-    const next = pts[Math.min(N, i + 1)];
+    const next = pts[Math.min(M, i + 1)];
     let tx = next.x - prev.x;
     let ty = next.y - prev.y;
     const tl = Math.hypot(tx, ty) || 1;
@@ -3020,8 +3032,8 @@ function brushArrow(from: Pt, to: Pt, rand: () => number, scale: number): BrushA
   const body = `M ${poly(left)} L ${poly(right.reverse())} Z`;
   const spine = `M ${poly(pts)}`;
   // Punta: sigue la dirección del final de la curva
-  const last = pts[N];
-  const before = pts[N - 3];
+  const last = curve[N];
+  const before = curve[N - 3];
   let hx = last.x - before.x;
   let hy = last.y - before.y;
   const hl = Math.hypot(hx, hy) || 1;
