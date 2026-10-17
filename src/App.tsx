@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
-import { Sidebar } from './components/Sidebar';
-import { Tabletop } from './components/Tabletop';
-import type { BoardCard, LifeCounter, CardTemplate, CardBack } from './types';
+import { DeckEditor } from './components/DeckEditor';
+import type { CardTemplate, CardBack } from './types';
 import {
   getCardTemplates,
   saveCardTemplate,
@@ -10,7 +9,6 @@ import {
   saveCardBack,
   deleteCardBack,
 } from './db';
-import { RotateCw, RotateCcw, Eye, Shuffle, Trash2 } from 'lucide-react';
 import { OnlineMode } from './online/OnlineMode';
 import { SoloMode } from './local/SoloMode';
 import { loadStoredSession } from './online/useOnlineGame';
@@ -69,22 +67,6 @@ export default function App() {
   // Custom Card Back Object URLs
   const [backUrls, setBackUrls] = useState<Record<string, string>>({});
 
-  // Board elements state
-  const [cards, setCards] = useState<BoardCard[]>([]);
-  const [counters, setCounters] = useState<LifeCounter[]>([]);
-
-  // Selection states
-  const [selectedCardIds, setSelectedCardIds] = useState<Set<string>>(new Set());
-  const [selectedCounterIds, setSelectedCounterIds] = useState<Set<string>>(new Set());
-
-  // Shuffling animation triggers
-  const [shufflingCardIds, setShufflingCardIds] = useState<Set<string>>(new Set());
-
-  // Stacking zIndex tracker
-  const [nextZIndex, setNextZIndex] = useState<number>(10);
-
-  // Sidebar visibility state
-  const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(true);
 
   // Modo: un jugador (mesa como la del 1 vs 1), biblioteca de mazos (la mesa libre
   // de siempre, con el menú para gestionar cartas) u online 1 vs 1
@@ -163,12 +145,6 @@ export default function App() {
             setDeckNames(db.deckNames);
           }
 
-          // 4. Load board state (Persists position on reopen)
-          if (db.boardState) {
-            setCards(db.boardState.cards || []);
-            setCounters(db.boardState.counters || []);
-            setNextZIndex(db.boardState.nextZIndex || 10);
-          }
         } else {
           // Standard browser IndexedDB flow
           // 1. Load card designs templates
@@ -198,31 +174,6 @@ export default function App() {
               console.error(e);
             }
           }
-
-          // 4. Load board state
-          const storedCards = localStorage.getItem('sim_cards');
-          const storedCounters = localStorage.getItem('sim_counters');
-
-          if (storedCards) {
-            try {
-              const parsedCards = JSON.parse(storedCards) as BoardCard[];
-              setCards(parsedCards);
-              const maxZ = parsedCards.reduce((max, c) => Math.max(max, c.zIndex), 0);
-              setNextZIndex((prev) => Math.max(prev, maxZ + 1));
-            } catch (e) {
-              console.error(e);
-            }
-          }
-          if (storedCounters) {
-            try {
-              const parsedCounters = JSON.parse(storedCounters) as LifeCounter[];
-              setCounters(parsedCounters);
-              const maxZ = parsedCounters.reduce((max, c) => Math.max(max, c.zIndex), 0);
-              setNextZIndex((prev) => Math.max(prev, maxZ + 1));
-            } catch (e) {
-              console.error(e);
-            }
-          }
         }
       } catch (err) {
         console.error('Error loading initial data:', err);
@@ -231,23 +182,6 @@ export default function App() {
     };
     loadAllData();
   }, []);
-
-  // Save board status to LocalStorage or Electron JSON db on changes
-  useEffect(() => {
-    if (isElectron) {
-      window.electronAPI!.saveBoardState(cards, counters, nextZIndex);
-    } else {
-      localStorage.setItem('sim_cards', JSON.stringify(cards));
-    }
-  }, [cards, isElectron, nextZIndex, counters]);
-
-  useEffect(() => {
-    if (isElectron) {
-      window.electronAPI!.saveBoardState(cards, counters, nextZIndex);
-    } else {
-      localStorage.setItem('sim_counters', JSON.stringify(counters));
-    }
-  }, [counters, isElectron, nextZIndex, cards]);
 
   // Rename Decks
   const handleUpdateDeckName = (id: string, name: string) => {
@@ -267,6 +201,7 @@ export default function App() {
     }
     const updated = { ...deckNames, [newId]: newName };
     saveDeckNamesState(updated);
+    return newId;
   };
 
   // Delete a deck and all its templates and board instances (using custom modal confirmation)
@@ -274,7 +209,7 @@ export default function App() {
     const deckName = deckNames[deckId] || deckId;
     showConfirm(
       'Eliminar Mazo',
-      `¿Estás seguro de que quieres eliminar el mazo "${deckName}"? Se borrarán permanentemente todos sus diseños de la biblioteca y de la mesa.`,
+      `¿Estás seguro de que quieres eliminar el mazo "${deckName}"? Se borrarán permanentemente todas sus cartas.`,
       async () => {
         // 1. Delete all card templates of this deck from IndexedDB
         const templatesToDelete = templates.filter((t) => t.deckId === deckId);
@@ -282,10 +217,6 @@ export default function App() {
           await deleteCardTemplate(t.id);
           if (t.imageUrl) URL.revokeObjectURL(t.imageUrl);
         }
-
-        // 2. Remove all board cards of these templates from the tabletop
-        const deleteTemplateIds = new Set(templatesToDelete.map((t) => t.id));
-        setCards((prev) => prev.filter((c) => !deleteTemplateIds.has(c.templateId)));
 
         // 3. Update templates state
         setTemplates((prev) => prev.filter((t) => t.deckId !== deckId));
@@ -412,8 +343,6 @@ export default function App() {
         }
 
         const addedIds = new Set(added.map((t) => t.id));
-        const removedIds = new Set(old.map((t) => t.id).filter((id) => !addedIds.has(id)));
-        setCards((prev) => prev.filter((c) => !removedIds.has(c.templateId)));
         setTemplates((prev) => [...prev.filter((t) => !targetIds.has(t.deckId) && !addedIds.has(t.id)), ...added]);
         setBackUrls((prev) => ({ ...prev, ...newBackUrls }));
         const names = { ...deckNames };
@@ -524,7 +453,7 @@ export default function App() {
   const handleDeleteTemplate = async (id: string) => {
     showConfirm(
       'Eliminar Diseño',
-      '¿Estás seguro de que quieres eliminar este diseño? Se borrarán todas las copias en la mesa de juego.',
+      '¿Seguro que quieres eliminar esta carta del mazo?',
       async () => {
         await deleteCardTemplate(id);
 
@@ -535,16 +464,6 @@ export default function App() {
         }
 
         setTemplates((prev) => prev.filter((t) => t.id !== id));
-        setCards((prev) => prev.filter((c) => c.templateId !== id));
-
-        // Clear selection for deleted cards
-        setSelectedCardIds((prev) => {
-          const next = new Set(prev);
-          cards.forEach((c) => {
-            if (c.templateId === id) next.delete(c.id);
-          });
-          return next;
-        });
       }
     );
   };
@@ -619,282 +538,6 @@ export default function App() {
     );
   };
 
-  const isSpecialTemplate = (templateId: string) =>
-    !!templates.find((t) => t.id === templateId)?.isSpecial;
-
-  // Add card copies to board tabletop
-  const handleAddCardsToBoard = (templateId: string, count: number) => {
-    let startZ = nextZIndex;
-    const newCards: BoardCard[] = [];
-
-    // Spawn near center with overlapping layout
-    const startX = 450 + Math.random() * 50;
-    const startY = 250 + Math.random() * 50;
-
-    for (let i = 0; i < count; i++) {
-      startZ++;
-      newCards.push({
-        id: `card-${Date.now()}-${i}-${Math.random().toString(36).substr(2, 5)}`,
-        templateId,
-        x: startX + i * 16,
-        y: startY + i * 16,
-        isFaceUp: true,
-        rotation: 0,
-        zIndex: startZ,
-      });
-    }
-
-    setNextZIndex(startZ + 1);
-    setCards((prev) => [...prev, ...newCards]);
-  };
-
-  // Add all cards of a deck to the board (stacked at one point)
-  const handleAddDeckToBoard = (deckId: string) => {
-    const deckTemplates = templates.filter((t) => t.deckId === deckId);
-    if (deckTemplates.length === 0) return;
-
-    let startZ = nextZIndex;
-    const newCards: BoardCard[] = [];
-
-    const spawnX = 450 + Math.random() * 20;
-    const spawnY = 250 + Math.random() * 20;
-
-    // Special cards are added last so they end up on top of the pile
-    const inLibrary = deckTemplates.filter((t) => !t.isLife);
-    const ordered = [...inLibrary.filter((t) => !t.isSpecial), ...inLibrary.filter((t) => t.isSpecial)];
-    ordered.forEach((template) => {
-      const quantity = template.quantity || 1;
-      for (let i = 0; i < quantity; i++) {
-        startZ++;
-        newCards.push({
-          id: `card-${Date.now()}-${i}-${Math.random().toString(36).substr(2, 5)}`,
-          templateId: template.id,
-          x: spawnX,
-          y: spawnY,
-          isFaceUp: false, // Stacked decks are face down by default
-          rotation: 0,
-          zIndex: startZ,
-        });
-      }
-    });
-
-    setNextZIndex(startZ + 1);
-    setCards((prev) => [...prev, ...newCards]);
-  };
-
-  // Spawns a new life counter
-  const handleAddCounter = () => {
-    const startZ = nextZIndex + 1;
-    setNextZIndex(startZ);
-
-    const newCounter: LifeCounter = {
-      id: `counter-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-      x: 350 + Math.random() * 100,
-      y: 200 + Math.random() * 100,
-      value: 10,
-      label: 'VIDA',
-      zIndex: startZ,
-    };
-
-    setCounters((prev) => [...prev, newCounter]);
-  };
-
-  // Clear board (using custom modal confirmation)
-  const handleClearBoard = () => {
-    showConfirm(
-      'Limpiar Mesa',
-      '¿Estás seguro de que quieres limpiar la mesa de juego por completo? Se eliminarán todas las cartas y contadores en el tablero.',
-      () => {
-        setCards([]);
-        setCounters([]);
-        setSelectedCardIds(new Set());
-        setSelectedCounterIds(new Set());
-      }
-    );
-  };
-
-  // Selection managers
-  const handleSelectItems = (cardIds: Set<string>, counterIds: Set<string>) => {
-    setSelectedCardIds(cardIds);
-    setSelectedCounterIds(counterIds);
-  };
-
-  const handleClearSelection = () => {
-    setSelectedCardIds(new Set());
-    setSelectedCounterIds(new Set());
-  };
-
-  // Coordinates drag updates
-  const handleUpdateCardPositions = (updates: { id: string; x: number; y: number }[]) => {
-    if (updates.length === 0) return;
-    const updateMap = new Map(updates.map((u) => [u.id, u]));
-    setCards((prev) =>
-      prev.map((c) => {
-        const u = updateMap.get(c.id);
-        return u ? { ...c, x: u.x, y: u.y } : c;
-      })
-    );
-  };
-
-  const handleUpdateCounterPositions = (updates: { id: string; x: number; y: number }[]) => {
-    if (updates.length === 0) {
-      setCounters([...counters]);
-      return;
-    }
-    const updateMap = new Map(updates.map((u) => [u.id, u]));
-    setCounters((prev) =>
-      prev.map((c) => {
-        const u = updateMap.get(c.id);
-        return u ? { ...c, x: u.x, y: u.y } : c;
-      })
-    );
-  };
-
-  const handleUpdateCounterValue = (id: string, value: number) => {
-    setCounters((prev) =>
-      prev.map((c) => (c.id === id ? { ...c, value } : c))
-    );
-  };
-
-  const handleUpdateCounterLabel = (id: string, label: string) => {
-    setCounters((prev) =>
-      prev.map((c) => (c.id === id ? { ...c, label } : c))
-    );
-  };
-
-  // Bring to front stacking
-  // Bring a list of cards to front while preserving their relative stacking order
-  const handleUpdateCardsZIndex = (ids: string[]) => {
-    setCards((prev) => {
-      const draggedCards = prev.filter((c) => ids.includes(c.id));
-      draggedCards.sort((a, b) => a.zIndex - b.zIndex);
-
-      let currentZ = nextZIndex;
-      const idToNewZ: Record<string, number> = {};
-      draggedCards.forEach((c) => {
-        currentZ++;
-        idToNewZ[c.id] = currentZ;
-      });
-
-      setNextZIndex(currentZ);
-
-      return prev.map((c) => {
-        const newZ = idToNewZ[c.id];
-        return newZ !== undefined ? { ...c, zIndex: newZ } : c;
-      });
-    });
-  };
-
-  const handleUpdateCountersZIndex = (ids: string[]) => {
-    setCounters((prev) => {
-      const draggedCounters = prev.filter((c) => ids.includes(c.id));
-      draggedCounters.sort((a, b) => a.zIndex - b.zIndex);
-
-      let currentZ = nextZIndex;
-      const idToNewZ: Record<string, number> = {};
-      draggedCounters.forEach((c) => {
-        currentZ++;
-        idToNewZ[c.id] = currentZ;
-      });
-
-      setNextZIndex(currentZ);
-
-      return prev.map((c) => {
-        const newZ = idToNewZ[c.id];
-        return newZ !== undefined ? { ...c, zIndex: newZ } : c;
-      });
-    });
-  };
-
-  // Double click selects the entire stack sharing same coordinates
-  const handleDoubleClickCard = (id: string) => {
-    const targetCard = cards.find((c) => c.id === id);
-    if (!targetCard) return;
-
-    const stack = cards.filter((c) => c.x === targetCard.x && c.y === targetCard.y);
-    setSelectedCardIds(new Set(stack.map((c) => c.id)));
-    setSelectedCounterIds(new Set()); // clear counter selections
-  };
-
-  // Multi selection actions
-  const handleFlipSelected = () => {
-    if (selectedCardIds.size === 0) return;
-    setCards((prev) =>
-      prev.map((c) =>
-        selectedCardIds.has(c.id) ? { ...c, isFaceUp: !c.isFaceUp } : c
-      )
-    );
-  };
-
-  const handleRotateSelected = (degrees: number) => {
-    if (selectedCardIds.size === 0) return;
-    setCards((prev) =>
-      prev.map((c) =>
-        selectedCardIds.has(c.id)
-          ? { ...c, rotation: c.rotation + degrees }
-          : c
-      )
-    );
-  };
-
-  const handleDeleteSelected = () => {
-    if (selectedCardIds.size === 0 && selectedCounterIds.size === 0) return;
-
-    setCards((prev) => prev.filter((c) => !selectedCardIds.has(c.id)));
-    setCounters((prev) => prev.filter((c) => !selectedCounterIds.has(c.id)));
-
-    setSelectedCardIds(new Set());
-    setSelectedCounterIds(new Set());
-  };
-
-  const handleShuffleSelected = () => {
-    const selectedCards = cards.filter((c) => selectedCardIds.has(c.id));
-    if (selectedCards.length <= 1) return;
-
-    // Calculate center pile position
-    const avgX = selectedCards.reduce((sum, c) => sum + c.x, 0) / selectedCards.length;
-    const avgY = selectedCards.reduce((sum, c) => sum + c.y, 0) / selectedCards.length;
-
-    // Fisher-Yates Shuffle
-    const shuffled = [...selectedCards];
-    for (let i = shuffled.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-    }
-    // Special cards stay on top after shuffling
-    shuffled.sort((a, b) => Number(isSpecialTemplate(a.templateId)) - Number(isSpecialTemplate(b.templateId)));
-
-    let startZ = nextZIndex;
-    const updatedCards = cards.map((c) => {
-      if (selectedCardIds.has(c.id)) {
-        const index = shuffled.findIndex((sc) => sc.id === c.id);
-        startZ++;
-        return {
-          ...c,
-          x: avgX,
-          y: avgY,
-          zIndex: startZ + index,
-        };
-      }
-      return c;
-    });
-
-    setNextZIndex(startZ + selectedCards.length);
-    setCards(updatedCards);
-
-    // Wobble animation trigger
-    const activeIds = new Set(selectedCardIds);
-    setShufflingCardIds(activeIds);
-    setTimeout(() => {
-      setShufflingCardIds((prev) => {
-        const next = new Set(prev);
-        activeIds.forEach((id) => next.delete(id));
-        return next;
-      });
-    }, 500);
-  };
-
-  const hasSelection = selectedCardIds.size > 0 || selectedCounterIds.size > 0;
 
   if (mode === 'online' || !editUnlocked) {
     return (
@@ -917,13 +560,11 @@ export default function App() {
   }
 
   return (
-    <div style={{ width: '100%', height: '100%', position: 'relative', overflow: 'hidden' }}>
-      {/* Sidebar Panel */}
-      <Sidebar
-        isOpen={isSidebarOpen}
-        onToggle={() => setIsSidebarOpen(!isSidebarOpen)}
+    <div style={{ width: '100%', height: '100%', position: 'relative' }}>
+      <DeckEditor
         templates={templates}
         deckNames={deckNames}
+        backUrls={backUrls}
         onUpdateDeckName={handleUpdateDeckName}
         onCreateDeck={handleCreateDeck}
         onDeleteDeck={handleDeleteDeck}
@@ -934,96 +575,13 @@ export default function App() {
         onUpdateTemplateQuantity={handleUpdateTemplateQuantity}
         onUpdateTemplateSpecial={handleUpdateTemplateSpecial}
         onUpdateTemplateLife={handleUpdateTemplateLife}
-        onAddCardsToBoard={handleAddCardsToBoard}
-        onAddDeckToBoard={handleAddDeckToBoard}
-        onAddCounter={handleAddCounter}
-        onClearBoard={handleClearBoard}
-        backUrls={backUrls}
         onUploadBack={handleUploadBack}
         onDeleteBack={handleDeleteBack}
         showAlert={showAlert}
-        onOpenOnline={() => setMode('online')}
-        onOpenSolo={() => setMode('solo')}
+        onPlaySolo={() => setMode('solo')}
+        onExit={isElectron ? undefined : () => setMode('online')}
         onImportServerDecks={() => handleImportServerDecks()}
         importProgress={importProgress}
-      />
-
-      {/* Floating Toolbar */}
-      {hasSelection && (
-        <div
-          className="glass-panel"
-          style={{
-            position: 'absolute',
-            top: '20px',
-            left: '50%',
-            transform: 'translateX(-50%)',
-            padding: '10px 20px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '14px',
-            zIndex: 1001,
-            border: '1px solid rgba(255, 255, 255, 0.15)',
-            boxShadow: '0 10px 30px rgba(0,0,0,0.6)',
-          }}
-        >
-          <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-muted)', marginRight: '6px' }}>
-            Selección:{' '}
-            <span style={{ color: '#fff' }}>
-              {selectedCardIds.size > 0 ? `${selectedCardIds.size} c.` : ''}
-              {selectedCardIds.size > 0 && selectedCounterIds.size > 0 ? ' + ' : ''}
-              {selectedCounterIds.size > 0 ? `${selectedCounterIds.size} cont.` : ''}
-            </span>
-          </div>
-
-          {selectedCardIds.size > 0 && (
-            <>
-              <button className="btn-secondary" onClick={handleFlipSelected} title="Voltear (F)" style={{ padding: '6px 12px', fontSize: '0.8rem' }}>
-                <Eye size={14} /> Voltear
-              </button>
-              <button className="btn-secondary" onClick={() => handleRotateSelected(-90)} title="Rotar Izq. (Q)" style={{ padding: '6px 12px', fontSize: '0.8rem' }}>
-                <RotateCcw size={14} /> Rotar Izq.
-              </button>
-              <button className="btn-secondary" onClick={() => handleRotateSelected(90)} title="Rotar Der. (E)" style={{ padding: '6px 12px', fontSize: '0.8rem' }}>
-                <RotateCw size={14} /> Rotar Der.
-              </button>
-              {selectedCardIds.size > 1 && (
-                <button className="btn-secondary" onClick={handleShuffleSelected} title="Barajar (Z)" style={{ padding: '6px 12px', fontSize: '0.8rem' }}>
-                  <Shuffle size={14} /> Barajar
-                </button>
-              )}
-            </>
-          )}
-
-          <div style={{ width: '1px', height: '20px', background: 'var(--glass-border)' }} />
-
-          <button className="btn-danger" onClick={handleDeleteSelected} title="Eliminar (Supr)" style={{ padding: '6px 12px', fontSize: '0.8rem' }}>
-            <Trash2 size={14} /> Eliminar
-          </button>
-        </div>
-      )}
-
-      {/* Main Tabletop Board Canvas */}
-      <Tabletop
-        cards={cards}
-        counters={counters}
-        templates={templates}
-        selectedCardIds={selectedCardIds}
-        selectedCounterIds={selectedCounterIds}
-        shufflingCardIds={shufflingCardIds}
-        backUrls={backUrls}
-        onSelectItems={handleSelectItems}
-        onClearSelection={handleClearSelection}
-        onUpdateCardPositions={handleUpdateCardPositions}
-        onUpdateCounterPositions={handleUpdateCounterPositions}
-        onUpdateCounterValue={handleUpdateCounterValue}
-        onUpdateCounterLabel={handleUpdateCounterLabel}
-        onUpdateCardsZIndex={handleUpdateCardsZIndex}
-        onUpdateCountersZIndex={handleUpdateCountersZIndex}
-        onDoubleClickCard={handleDoubleClickCard}
-        onFlipSelected={handleFlipSelected}
-        onRotateSelected={handleRotateSelected}
-        onDeleteSelected={handleDeleteSelected}
-        onShuffleSelected={handleShuffleSelected}
       />
 
       {/* Custom Glassmorphic Popup Modal */}
