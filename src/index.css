@@ -660,3 +660,31 @@ html.rot-landscape #root {
   0%, 100% { transform: scale(1); }
   50% { transform: scale(1.12); }
 }
+
+/* Historial de partidas */
+.mh-line {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: olArrowDraw 0.9s ease-out forwards;
+}
+.mh-bar {
+  transform-origin: left center;
+  animation: mhGrow 0.6s cubic-bezier(0.2, 0.8, 0.3, 1) both;
+}
+@keyframes mhGrow { from { transform: scaleX(0); } }
+
+/* Barajar la biblioteca: las cartas se separan y se mezclan */
+.ol-shuffle-card {
+  position: absolute;
+  pointer-events: none;
+  animation: olShuffle 0.95s ease-in-out both;
+}
+@keyframes olShuffle {
+  0% { transform: none; }
+  18% { transform: translate(var(--dx), -6px) rotate(var(--rot)); z-index: var(--z1); }
+  36% { transform: translate(0, -2px) rotate(0deg); }
+  54% { transform: translate(calc(var(--dx) * -0.8), -6px) rotate(calc(var(--rot) * -1)); z-index: var(--z2); }
+  72% { transform: translate(0, -2px) rotate(0deg); }
+  86% { transform: translate(calc(var(--dx) * 0.4), -2px); }
+  100% { transform: none; }
+}

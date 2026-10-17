@@ -136,6 +136,11 @@ export class Game {
       c.order = this.nextOrder();
       this.reId(c);
     }
+    // Contador para que los dos jugadores vean la animación de barajar
+    if (list.length) {
+      this.shuffles = this.shuffles || {};
+      this.shuffles[side] = (this.shuffles[side] || 0) + 1;
+    }
     return list.length;
   }
 
@@ -148,7 +153,7 @@ export class Game {
       const top = library[library.length - 1];
       const hand = this.zoneCards(side, 'hand');
       return {
-        library: { count: library.length, top: top ? { deckId: top.deckId, backType: top.backType } : null },
+        library: { count: library.length, top: top ? { deckId: top.deckId, backType: top.backType } : null, shuffles: this.shuffles?.[side] || 0 },
         // El cementerio está boca abajo: solo se envía el reverso (también la Especial)
         graveyard: this.zoneCards(side, 'graveyard').map((c) => ({ id: c.id, deckId: c.deckId, backType: c.backType })),
         play: this.zoneCards(side, 'play').map((c) => {
