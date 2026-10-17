@@ -2107,53 +2107,45 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
     }
   }
 
-  // Flechas de "señalar": de la carta que señala a cada objetivo, con el color de su campeón
+  // Flechas de "señalar": trazos como hechos a mano, de la carta que señala a la parte baja de cada objetivo
   const pointerArrows = () => {
     const p = pointer && pointer.rev !== hiddenPointRev ? pointer : null;
     const src = pointing ? playLayout.get(pointing.from) : null;
     if (!p && !src) return null;
-    const center = (id: string) => {
-      const r = playLayout.get(id);
-      return r ? { x: r.x + L.cardW / 2, y: r.y + L.cardH / 2 } : null;
-    };
     const color = (p ? (p.by === seatOf('me') ? myBackColor : oppBackColor) : myBackColor) || '#ef4444';
-    const paths: { key: string; d: string }[] = [];
+    const arrows: (BrushArrow & { key: string })[] = [];
     if (p) {
-      const a = center(p.from);
+      const a = playLayout.get(p.from);
       if (a)
         for (const t of p.targets) {
-          const b = center(t);
+          const b = playLayout.get(t);
           if (!b) continue;
-          const len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
-          const ux = (b.x - a.x) / len;
-          const uy = (b.y - a.y) / len;
-          // Sale del borde de la carta y la punta se queda sobre el objetivo
-          const sx = a.x + ux * L.cardH * 0.3;
-          const sy = a.y + uy * L.cardH * 0.3;
-          const ex = b.x - ux * L.cardH * 0.18;
-          const ey = b.y - uy * L.cardH * 0.18;
-          // Un poco curvada
-          const bend = Math.min(80, len * 0.18);
-          const cx = (sx + ex) / 2 - uy * bend;
-          const cy = (sy + ey) / 2 + ux * bend;
-          paths.push({ key: `${p.from}-${t}`, d: `M ${sx} ${sy} Q ${cx} ${cy} ${ex} ${ey}` });
+          // Mismo dibujo para los dos jugadores: el azar sale de las cartas implicadas
+          const rand = seededRandom(`${p.rev}:${p.from}:${t}`);
+          const from = { x: a.x + L.cardW * (0.4 + rand() * 0.2), y: a.y + L.cardH * (0.42 + rand() * 0.16) };
+          const to = { x: b.x + L.cardW * (0.35 + rand() * 0.3), y: b.y + L.cardH * (0.8 + rand() * 0.08) };
+          arrows.push({ key: `${p.from}-${t}`, ...brushArrow(from, to, rand, L.cardH) });
         }
     }
     return (
       <svg width={BOARD_W} height={L.boardH} style={{ position: 'absolute', left: 0, top: 0, pointerEvents: 'none', zIndex: 440000, overflow: 'visible', color }}>
         <defs>
-          <marker id="ol-arrow-head" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="4" markerHeight="4" orient="auto-start-reverse">
-            <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor" />
-          </marker>
+          <filter id="ol-arrow-shadow" x="-20%" y="-20%" width="140%" height="140%">
+            <feDropShadow dx="0" dy="4" stdDeviation="4" floodColor="#000" floodOpacity="0.6" />
+          </filter>
         </defs>
         {src && pointing && (
-          <circle className="ol-point-src" cx={src.x + L.cardW / 2} cy={src.y + L.cardH / 2} r={L.cardH * 0.36} fill="none" stroke="currentColor" strokeWidth={5} />
+          <circle className="ol-point-src" cx={src.x + L.cardW / 2} cy={src.y + L.cardH / 2} r={L.cardH * 0.36} fill="none" stroke="currentColor" strokeWidth={5} strokeDasharray="14 10" />
         )}
-        {paths.map((a) => (
-          <g key={a.key}>
-            <path d={a.d} fill="none" stroke="rgba(0,0,0,0.55)" strokeWidth={16} strokeLinecap="round" className="ol-arrow-draw" pathLength={1} />
-            <path d={a.d} fill="none" stroke="currentColor" strokeWidth={9} strokeLinecap="round" markerEnd="url(#ol-arrow-head)" className="ol-arrow-draw" pathLength={1} />
-            <path d={a.d} fill="none" stroke="rgba(255,255,255,0.75)" strokeWidth={3} strokeLinecap="round" strokeDasharray="10 22" className="ol-arrow-flow" />
+        {arrows.map((a) => (
+          <g key={a.key} filter="url(#ol-arrow-shadow)">
+            <mask id={`ol-mask-${a.key}`} maskUnits="userSpaceOnUse">
+              <path d={a.spine} fill="none" stroke="#fff" strokeWidth={40} strokeLinecap="round" pathLength={1} className="ol-arrow-draw" />
+            </mask>
+            <g mask={`url(#ol-mask-${a.key})`}>
+              <path d={a.body} fill="currentColor" stroke="rgba(0,0,0,0.65)" strokeWidth={2.5} strokeLinejoin="round" />
+            </g>
+            <path d={a.head} fill="currentColor" stroke="rgba(0,0,0,0.65)" strokeWidth={2.5} strokeLinejoin="round" className="ol-arrow-head" style={{ transformOrigin: `${a.tip.x}px ${a.tip.y}px` }} />
           </g>
         ))}
       </svg>
@@ -2953,4 +2945,97 @@ function useBackColor(url: string | undefined): string | null {
     img.src = url;
   }, [url]);
   return url ? backColorCache.get(url) || null : null;
+}
+
+// ---------- Flechas hechas a mano ----------
+
+type Pt = { x: number; y: number };
+export type BrushArrow = { body: string; spine: string; head: string; tip: Pt };
+
+// Números al azar repetibles a partir de un texto (igual en los dos jugadores)
+function seededRandom(seed: string) {
+  let h = 1779033703 ^ seed.length;
+  for (let i = 0; i < seed.length; i++) {
+    h = Math.imul(h ^ seed.charCodeAt(i), 3432918353);
+    h = (h << 13) | (h >>> 19);
+  }
+  let a = h >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// Trazo de pincel de `from` a `to`: curva con algo de azar (a veces en S), grosor que
+// crece y se afina, un ligero temblor y una punta de flecha con las alas algo curvadas
+function brushArrow(from: Pt, to: Pt, rand: () => number, scale: number): BrushArrow {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const len = Math.hypot(dx, dy) || 1;
+  const ux = dx / len;
+  const uy = dy / len;
+  const rot = (x: number, y: number, a: number) => ({ x: x * Math.cos(a) - y * Math.sin(a), y: x * Math.sin(a) + y * Math.cos(a) });
+  // Ángulos de salida y llegada al azar, a cada lado sin preferencia
+  const a1 = (rand() < 0.5 ? -1 : 1) * (0.25 + rand() * 0.55);
+  const a2 = (rand() < 0.5 ? -1 : 1) * (0.1 + rand() * 0.45);
+  const d1 = rot(ux, uy, a1);
+  const d2 = rot(ux, uy, a2);
+  const headLen = Math.min(scale * 0.2, 16 + len * 0.12);
+  // El cuerpo termina donde empieza la punta
+  const end = { x: to.x - ux * headLen * 0.75, y: to.y - uy * headLen * 0.75 };
+  const c1 = { x: from.x + d1.x * len * (0.3 + rand() * 0.15), y: from.y + d1.y * len * (0.3 + rand() * 0.15) };
+  const c2 = { x: end.x - d2.x * len * (0.25 + rand() * 0.15), y: end.y - d2.y * len * (0.25 + rand() * 0.15) };
+  const at = (t: number) => {
+    const m = 1 - t;
+    return {
+      x: m * m * m * from.x + 3 * m * m * t * c1.x + 3 * m * t * t * c2.x + t * t * t * end.x,
+      y: m * m * m * from.y + 3 * m * m * t * c1.y + 3 * m * t * t * c2.y + t * t * t * end.y,
+    };
+  };
+  const N = 36;
+  const pts = Array.from({ length: N + 1 }, (_, i) => at(i / N));
+  const wobble = [rand() * 6, rand() * 6, 2 + rand() * 2];
+  const maxW = Math.max(7, Math.min(13, scale * 0.07));
+  const left: Pt[] = [];
+  const right: Pt[] = [];
+  pts.forEach((pt, i) => {
+    const t = i / N;
+    const prev = pts[Math.max(0, i - 1)];
+    const next = pts[Math.min(N, i + 1)];
+    let tx = next.x - prev.x;
+    let ty = next.y - prev.y;
+    const tl = Math.hypot(tx, ty) || 1;
+    tx /= tl;
+    ty /= tl;
+    // Fino al salir, más grueso hacia el final y algo irregular, como un pincel
+    const w = (maxW / 2) * (0.25 + 0.75 * Math.sin(Math.min(1, t * 1.15) * Math.PI * 0.55)) * (1 + 0.12 * Math.sin(t * wobble[2] * Math.PI * 2 + wobble[0]));
+    left.push({ x: pt.x - ty * w, y: pt.y + tx * w });
+    right.push({ x: pt.x + ty * w, y: pt.y - tx * w });
+  });
+  const f = (n: number) => n.toFixed(1);
+  const poly = (list: Pt[]) => list.map((q) => `${f(q.x)} ${f(q.y)}`).join(' L ');
+  const body = `M ${poly(left)} L ${poly(right.reverse())} Z`;
+  const spine = `M ${poly(pts)}`;
+  // Punta: sigue la dirección del final de la curva
+  const last = pts[N];
+  const before = pts[N - 3];
+  let hx = last.x - before.x;
+  let hy = last.y - before.y;
+  const hl = Math.hypot(hx, hy) || 1;
+  hx /= hl;
+  hy /= hl;
+  const tip = { x: last.x + hx * headLen, y: last.y + hy * headLen };
+  const half = headLen * (0.55 + rand() * 0.12);
+  const back = { x: last.x - hx * headLen * 0.2, y: last.y - hy * headLen * 0.2 };
+  const wingL = { x: back.x - hy * half, y: back.y + hx * half };
+  const wingR = { x: back.x + hy * half, y: back.y - hx * half };
+  const notch = { x: last.x + hx * headLen * 0.12, y: last.y + hy * headLen * 0.12 };
+  const bow = (p1: Pt, p2: Pt, k: number) => ({ x: (p1.x + p2.x) / 2 - (p2.y - p1.y) * k, y: (p1.y + p2.y) / 2 + (p2.x - p1.x) * k });
+  const qL = bow(tip, wingL, -0.12);
+  const qR = bow(wingR, tip, -0.12);
+  const head = `M ${f(tip.x)} ${f(tip.y)} Q ${f(qL.x)} ${f(qL.y)} ${f(wingL.x)} ${f(wingL.y)} L ${f(notch.x)} ${f(notch.y)} L ${f(wingR.x)} ${f(wingR.y)} Q ${f(qR.x)} ${f(qR.y)} ${f(tip.x)} ${f(tip.y)} Z`;
+  return { body, spine, head, tip };
 }
