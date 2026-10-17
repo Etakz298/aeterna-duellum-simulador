@@ -168,7 +168,7 @@ export class Game {
     const players = {};
     for (const s of SEATS) {
       const p = this.players[s];
-      if (p) players[s] = { name: p.name, connected: p.connected, deckId: p.deckId, left: !!p.left, handRevealed: !!p.handRevealed };
+      if (p) players[s] = { name: p.name, connected: p.connected, visible: p.connected && p.visible !== false, deckId: p.deckId, left: !!p.left, handRevealed: !!p.handRevealed };
     }
 
     return {
