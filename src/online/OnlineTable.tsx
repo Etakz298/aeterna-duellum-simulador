@@ -1322,6 +1322,15 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
     );
   };
 
+  // Presencia del rival: verde si está viendo la partida, naranja si tiene la
+  // ventana en segundo plano y rojo si no está conectado
+  const presence = !oppInfo || oppInfo.left || !oppInfo.connected ? 'off' : oppInfo.visible === false ? 'away' : 'on';
+  const presenceDot = (
+    <span
+      className={`ol-presence ol-presence-${presence}`}
+      title={presence === 'on' ? 'Está viendo la partida' : presence === 'away' ? 'Conectado, pero sin la partida a la vista' : oppInfo?.left ? 'Ha salido de la sala' : 'No está conectado'}
+    />
+  );
   const oppHandTray = () => {
     if (solo) return soloOppHandTray();
     const r = zoneRect('opp', 'hand');
@@ -1332,7 +1341,8 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
       <React.Fragment key="opp-hand">
         <div className="glass-panel" style={{ position: 'absolute', left: r.x, top: r.y, width: r.w, height: r.h, borderRadius: 18 }}>
           <div style={{ position: 'absolute', bottom: 6, left: 0, right: 0, textAlign: 'center', fontSize: 14, color: 'var(--text-muted)' }}>
-            Mano de <strong style={{ color: '#fff' }}>{oppInfo?.name || 'tu rival'}</strong>: {n} {n === 1 ? 'carta' : 'cartas'}
+            Mano de <strong style={{ color: '#fff' }}>{oppInfo?.name || 'tu rival'}</strong>
+            {presenceDot}: {n} {n === 1 ? 'carta' : 'cartas'}
             {oppInfo?.handRevealed && <span style={{ color: 'var(--color-accent)' }}> · te la está enseñando</span>}
           </div>
         </div>
@@ -1680,6 +1690,15 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
     setEmojiOpen(null);
   };
 
+  // Avisa al rival de si esta ventana tiene la partida a la vista
+  useEffect(() => {
+    if (solo || status !== 'open') return;
+    const report = () => send({ t: 'visibility', visible: document.visibilityState === 'visible' });
+    report();
+    document.addEventListener('visibilitychange', report);
+    return () => document.removeEventListener('visibilitychange', report);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [solo, status]);
   useEffect(() => {
     const chats = state.log.filter((e) => e.kind === 'chat');
     const unseen = chats.filter((e) => !toastedChat.current.has(e.id));

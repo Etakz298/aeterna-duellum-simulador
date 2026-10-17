@@ -746,3 +746,33 @@ html.rot-landscape #root {
   font-size: 0.85rem;
   border-radius: 999px;
 }
+
+/* Presencia del rival junto a su mano */
+.ol-presence {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  margin-left: 6px;
+  vertical-align: middle;
+  position: relative;
+  top: -1px;
+}
+.ol-presence-on {
+  background: #22c55e;
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.22), 0 0 8px rgba(34, 197, 94, 0.7);
+  animation: olPresence 2.4s ease-in-out infinite;
+}
+.ol-presence-away {
+  background: #f59e0b;
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.22);
+}
+.ol-presence-off {
+  background: #ef4444;
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.22);
+}
+@keyframes olPresence {
+  50% {
+    box-shadow: 0 0 0 5px rgba(34, 197, 94, 0.08), 0 0 8px rgba(34, 197, 94, 0.7);
+  }
+}

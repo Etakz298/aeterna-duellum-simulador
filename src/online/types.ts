@@ -39,6 +39,7 @@ export interface OnlineHandCard extends CardBackInfo {
 export interface OnlinePlayer {
   name: string;
   connected: boolean;
+  visible?: boolean; // tiene la partida a la vista (pestaña abierta y visible)
   deckId: string | null;
   left?: boolean;
   handRevealed?: boolean;

@@ -315,6 +315,7 @@ function attach(ws, room, seat) {
   }
   room.sockets[seat] = ws;
   room.game.players[seat].connected = true;
+  room.game.players[seat].visible = true; // la ventana avisa enseguida si no está a la vista
   ws.room = room;
   ws.seat = seat;
 }
@@ -416,6 +417,16 @@ wss.on('connection', (ws) => {
         return;
       }
       if (msg.t === 'voice') return receiveVoice(room, ws.seat, msg);
+      // Presencia: si el jugador tiene la partida a la vista o la ventana en segundo plano
+      if (msg.t === 'visibility') {
+        const player = room.game.players[ws.seat];
+        const visible = msg.visible !== false;
+        if (player.visible === visible) return;
+        player.visible = visible;
+        room.game.bump();
+        broadcastState(room);
+        return;
+      }
       if (msg.t === 'voiceHeard') {
         const entry = room.game.log.find((e) => e.audio && e.audio.id === msg.id);
         if (!entry || entry.by === ws.seat || entry.audio.heard) return;
