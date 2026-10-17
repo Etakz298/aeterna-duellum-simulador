@@ -68,6 +68,7 @@ interface Pending {
   quantity: number;
   isSpecial?: boolean;
   isLife?: boolean;
+  backType: BackType;
 }
 
 // Editor de mazos: lista de mazos a la izquierda y las cartas del mazo elegido a la derecha
@@ -78,7 +79,6 @@ export const DeckEditor: React.FC<DeckEditorProps> = (props) => {
   const [query, setQuery] = useState('');
   const [editingName, setEditingName] = useState<string | null>(null);
   const [pending, setPending] = useState<Pending[]>([]);
-  const [pendingBack, setPendingBack] = useState<BackType>('backA');
   const [dragOver, setDragOver] = useState(false);
   const [busy, setBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -113,17 +113,30 @@ export const DeckEditor: React.FC<DeckEditorProps> = (props) => {
       try {
         const blob = await toImageBlob(file);
         if (!blob) continue;
+        // Por el nombre del archivo: «Habilities» es la Especial y «Health» la de vida,
+        // las dos con el reverso B; el resto lleva el reverso A
+        const isSpecial = /habilit/i.test(base);
+        const isLife = !isSpecial && /health/i.test(base);
         next.push({
           name: qty ? base.slice(0, base.length - qty[0].length).trim() : base,
           blob,
           url: URL.createObjectURL(blob),
           quantity: qty ? parseInt(qty[1]) || 1 : 1,
+          isSpecial,
+          isLife,
+          backType: isSpecial || isLife ? 'backB' : 'backA',
         });
       } catch {
         props.showAlert('Formato no válido', `No se pudo leer ${file.name}`);
       }
     }
-    setPending((p) => [...p, ...next]);
+    // Solo una Especial y una de vida por lote: se queda la última
+    setPending((p) => {
+      const all = [...p, ...next];
+      const lastSpecial = all.map((x) => !!x.isSpecial).lastIndexOf(true);
+      const lastLife = all.map((x) => !!x.isLife).lastIndexOf(true);
+      return all.map((x, i) => ({ ...x, isSpecial: x.isSpecial && i === lastSpecial, isLife: x.isLife && i === lastLife }));
+    });
     setBusy(false);
     if (fileRef.current) fileRef.current.value = '';
   };
@@ -134,7 +147,7 @@ export const DeckEditor: React.FC<DeckEditorProps> = (props) => {
   const importPending = async () => {
     setBusy(true);
     await props.onAddTemplates(
-      pending.map((p) => ({ name: p.name.trim() || 'Carta', blob: p.blob, deckId, backType: pendingBack, quantity: p.quantity, isSpecial: !!p.isSpecial, isLife: !!p.isLife })),
+      pending.map((p) => ({ name: p.name.trim() || 'Carta', blob: p.blob, deckId, backType: p.backType, quantity: p.quantity, isSpecial: !!p.isSpecial, isLife: !!p.isLife })),
     );
     clearPending();
     setBusy(false);
@@ -399,13 +412,9 @@ export const DeckEditor: React.FC<DeckEditorProps> = (props) => {
               <h3>
                 Añadir {pending.length} {pending.length === 1 ? 'carta' : 'cartas'} a <span style={{ color: 'var(--color-accent)' }}>{deckTitle}</span>
               </h3>
-              <div className="de-seg" title="Reverso de las cartas nuevas">
-                {(['backA', 'backB'] as BackType[]).map((type) => (
-                  <button key={type} className={pendingBack === type ? 'de-seg-on' : ''} onClick={() => setPendingBack(type)}>
-                    Reverso {type === 'backA' ? 'A' : 'B'}
-                  </button>
-                ))}
-              </div>
+              <span className="de-muted" style={{ fontSize: '0.8rem' }}>
+                «Habilities» se marca como Especial y «Health» como Vida, las dos con reverso B
+              </span>
             </div>
             <div className="de-grid de-grid-sm">
               {pending.map((p, i) => (
@@ -439,6 +448,9 @@ export const DeckEditor: React.FC<DeckEditorProps> = (props) => {
                     </button>
                     <button className={`de-chip${p.isLife ? ' de-chip-life' : ''}`} onClick={() => patchPending(i, { isLife: !p.isLife })} title="Carta de vida">
                       <Heart size={12} />
+                    </button>
+                    <button className="de-chip" onClick={() => patchPending(i, { backType: p.backType === 'backA' ? 'backB' : 'backA' })} title="Reverso de esta carta (A o B)">
+                      {p.backType === 'backB' ? 'B' : 'A'}
                     </button>
                   </div>
                 </div>

@@ -18,7 +18,6 @@ import {
   LogOut,
   MessageSquare,
   Smile,
-  RefreshCw,
   Shuffle,
   Trophy,
   X,
@@ -1694,6 +1693,11 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
     setEmojiOpen(null);
   };
 
+  // Al entrar en la sala se recargan los mazos del servidor (por si se han publicado nuevos)
+  useEffect(() => {
+    if (!solo) onReloadLibrary();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // Avisa al rival de si esta ventana tiene la partida a la vista
   useEffect(() => {
     if (solo || status !== 'open') return;
@@ -2712,20 +2716,13 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
         const side: SideKey = solo ? soloPick! : 'me';
         const other = state.players[seatOf(side === 'me' ? 'opp' : 'me')];
         const close = () => (solo ? setSoloPick(null) : setPickClosed(true));
+        const champH = compact ? 'min(230px, calc(var(--app-h, 100vh) - 132px))' : 'min(270px, calc(var(--app-h, 100vh) - 170px))';
         return (
         <Overlay onClose={close}>
           <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: 4 }}>
             {solo ? `Campeón de ${state.players[seatOf(side)]?.name} (${side === 'me' ? 'abajo' : 'arriba'})` : 'Elige tu campeón'}
           </h3>
-          <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 14 }}>
-            {solo ? 'Su mazo se pondrá barajado y listo para empezar.' : 'Tu mazo se pondrá barajado y listo para empezar.'}{' '}
-            {!solo && (
-              <button className="btn-secondary" onClick={onReloadLibrary} title="Recargar mazos del servidor" style={{ padding: '2px 8px', fontSize: 12, verticalAlign: 'middle' }}>
-                <RefreshCw size={12} /> Recargar
-              </button>
-            )}
-          </p>
-          <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap', maxHeight: compact ? 'calc(var(--app-h, 100vh) - 150px)' : '70vh', overflowY: 'auto' }}>
+          <div style={{ display: 'flex', gap: compact ? 10 : 14, justifyContent: 'center', flexWrap: 'wrap', marginTop: compact ? 10 : 16 }}>
             {Object.entries(library.deckNames).map(([id, name]) => {
               const tpls = library.templates.filter((t) => t.deckId === id);
               // Reverso del mazo (siempre el tipo A; el B si no hay A)
@@ -2733,7 +2730,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
               const count = tpls.filter((t) => !t.isLife).reduce((n, t) => n + (t.quantity || 1), 0);
               const taken = !solo && oppInfo?.deckId === id;
               const current = state.players[seatOf(side)]?.deckId === id;
-              const note = taken ? 'Lo usa tu rival' : solo && other?.deckId === id ? `Lo usa ${other.name}` : current ? 'Elegido' : `${count} cartas`;
+              const note = taken ? 'Lo usa tu rival' : solo && other?.deckId === id ? `Lo usa ${other.name}` : current ? 'Elegido' : '';
               return (
                 <button
                   key={id}
@@ -2746,17 +2743,18 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
                     const next = side === 'me' && !state.players[seatOf('opp')]?.deckId ? 'opp' : null;
                     setSoloPick(next);
                   }}
-                  style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, padding: 8, width: compact ? 112 : 170, opacity: taken || count === 0 ? 0.45 : 1, outline: current ? '2px solid var(--color-accent)' : undefined }}
+                  style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, padding: compact ? 6 : 8, opacity: taken || count === 0 ? 0.45 : 1, outline: current ? '2px solid var(--color-accent)' : undefined }}
                 >
+                  {/* Alto según la pantalla para que los reversos quepan enteros sin desplazarse */}
                   {cover ? (
-                    <img src={cover} alt={name} style={{ width: '100%', aspectRatio: `${CARD_W} / ${CARD_H}`, objectFit: 'cover', borderRadius: 8 }} />
+                    <img src={cover} alt={name} style={{ height: champH, aspectRatio: `${CARD_W} / ${CARD_H}`, objectFit: 'cover', borderRadius: 8 }} />
                   ) : (
-                    <div style={{ width: '100%', aspectRatio: `${CARD_W} / ${CARD_H}`, borderRadius: 8, background: 'rgba(255,255,255,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <div style={{ height: champH, aspectRatio: `${CARD_W} / ${CARD_H}`, borderRadius: 8, background: 'rgba(255,255,255,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                       <Layers size={28} />
                     </div>
                   )}
                   <span style={{ fontWeight: 700, fontSize: compact ? 14 : 15 }}>{name}</span>
-                  <span style={{ fontSize: 12, color: current ? 'var(--color-accent)' : 'var(--text-muted)' }}>{note}</span>
+                  {note && <span style={{ fontSize: 12, color: current ? 'var(--color-accent)' : 'var(--text-muted)' }}>{note}</span>}
                 </button>
               );
             })}
@@ -2947,7 +2945,7 @@ const Overlay: React.FC<{ onClose: () => void; children: React.ReactNode }> = ({
     <div
       className="glass-panel"
       onPointerDown={(e) => e.stopPropagation()}
-      style={{ maxWidth: 'min(900px, calc(var(--app-w, 100vw) * 0.94))', maxHeight: 'calc(var(--app-h, 100vh) - 16px)', overflowY: 'auto', padding: '22px 44px', borderRadius: 16, position: 'relative', textAlign: 'center' }}
+      style={{ maxWidth: 'min(900px, calc(var(--app-w, 100vw) * 0.94))', maxHeight: 'calc(var(--app-h, 100vh) - 16px)', overflowY: 'auto', padding: 'clamp(12px, 3vh, 22px) clamp(18px, 4vw, 44px)', borderRadius: 16, position: 'relative', textAlign: 'center' }}
     >
       <button className="btn-secondary" onClick={onClose} style={{ position: 'absolute', top: 10, right: 10, padding: 4 }}>
         <X size={14} />
