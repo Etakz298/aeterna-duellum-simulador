@@ -2128,11 +2128,15 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
           const gap = 4;
           const ax = a.x + L.cardW / 2;
           const ay = a.y + L.cardH / 2;
-          const to =
-            Math.abs(ay - (b.y + L.cardH / 2)) > L.cardH * 0.6
-              ? { x: b.x + L.cardW * (0.3 + rand() * 0.4), y: ay > b.y + L.cardH / 2 ? b.y + L.cardH + gap : b.y - gap }
-              : { x: ax > b.x + L.cardW / 2 ? b.x + L.cardW + gap : b.x - gap, y: b.y + L.cardH * (0.3 + rand() * 0.2) };
-          arrows.push({ key: `${p.from}-${t}`, ...brushArrow(from, to, rand, L.cardH) });
+          // `into`: la dirección en la que la punta entra en la carta (perpendicular a ese borde)
+          const vertical = Math.abs(ay - (b.y + L.cardH / 2)) > L.cardH * 0.6;
+          const below = ay > b.y + L.cardH / 2;
+          const right = ax > b.x + L.cardW / 2;
+          const to = vertical
+            ? { x: b.x + L.cardW * (0.3 + rand() * 0.4), y: below ? b.y + L.cardH + gap : b.y - gap }
+            : { x: right ? b.x + L.cardW + gap : b.x - gap, y: b.y + L.cardH * (0.3 + rand() * 0.2) };
+          const into = vertical ? { x: 0, y: below ? -1 : 1 } : { x: right ? -1 : 1, y: 0 };
+          arrows.push({ key: `${p.from}-${t}`, ...brushArrow(from, to, rand, L.cardH, into) });
         }
     }
     return (
@@ -2976,7 +2980,7 @@ function seededRandom(seed: string) {
 
 // Trazo de pincel de `from` a `to`: curva con algo de azar (a veces en S), grosor que
 // crece y se afina, un ligero temblor y una punta de flecha con las alas algo curvadas
-function brushArrow(from: Pt, to: Pt, rand: () => number, scale: number): BrushArrow {
+function brushArrow(from: Pt, to: Pt, rand: () => number, scale: number, into: Pt): BrushArrow {
   const dx = to.x - from.x;
   const dy = to.y - from.y;
   const len = Math.hypot(dx, dy) || 1;
@@ -2985,12 +2989,13 @@ function brushArrow(from: Pt, to: Pt, rand: () => number, scale: number): BrushA
   const rot = (x: number, y: number, a: number) => ({ x: x * Math.cos(a) - y * Math.sin(a), y: x * Math.sin(a) + y * Math.cos(a) });
   // Ángulos de salida y llegada al azar, a cada lado sin preferencia
   const a1 = (rand() < 0.5 ? -1 : 1) * (0.25 + rand() * 0.55);
-  const a2 = (rand() < 0.5 ? -1 : 1) * (0.1 + rand() * 0.45);
+  // Llegada casi de frente al borde de la carta (solo un poco ladeada), para que la punta mire a la carta
+  const a2 = (rand() < 0.5 ? -1 : 1) * rand() * 0.22;
   const d1 = rot(ux, uy, a1);
-  const d2 = rot(ux, uy, a2);
+  const d2 = rot(into.x, into.y, a2);
   const headLen = Math.min(scale * 0.2, 16 + len * 0.12);
   // El cuerpo termina donde empieza la punta
-  const end = { x: to.x - ux * headLen * 0.75, y: to.y - uy * headLen * 0.75 };
+  const end = { x: to.x - d2.x * headLen * 0.75, y: to.y - d2.y * headLen * 0.75 };
   const c1 = { x: from.x + d1.x * len * (0.3 + rand() * 0.15), y: from.y + d1.y * len * (0.3 + rand() * 0.15) };
   const c2 = { x: end.x - d2.x * len * (0.25 + rand() * 0.15), y: end.y - d2.y * len * (0.25 + rand() * 0.15) };
   const at = (t: number) => {
