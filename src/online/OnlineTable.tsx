@@ -906,6 +906,20 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
     );
   };
 
+  // Animación de barajar: se lanza cuando cambia el contador de la biblioteca (para los dos jugadores)
+  const shuffleSeen = useRef({ me: state.me.library.shuffles || 0, opp: state.opp.library.shuffles || 0 });
+  const [shuffling, setShuffling] = useState<{ me?: number; opp?: number }>({});
+  useEffect(() => {
+    for (const side of ['me', 'opp'] as SideKey[]) {
+      const n = (side === 'me' ? state.me : state.opp).library.shuffles || 0;
+      if (n === shuffleSeen.current[side]) continue;
+      shuffleSeen.current[side] = n;
+      const at = Date.now();
+      setShuffling((s) => ({ ...s, [side]: at }));
+      window.setTimeout(() => setShuffling((s) => (s[side] === at ? { ...s, [side]: undefined } : s)), 1000);
+    }
+  }, [state.me.library.shuffles, state.opp.library.shuffles]);
+
   // Biblioteca (montón boca abajo)
   // Botón redondo de los montones (barajar)
   const roundSize = compact ? 60 : isTouch ? 52 : 44;
@@ -946,6 +960,36 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
             {cardImage(top.templateId, top, !!top.templateId)}
           </div>
         )}
+        {top &&
+          shuffling[side] &&
+          // Unas cuantas cartas del montón se separan a los lados y se mezclan
+          [0, 1, 2, 3, 4, 5].map((i) => {
+            const dir = i % 2 === 0 ? -1 : 1;
+            return (
+              <div
+                key={`${shuffling[side]}-${i}`}
+                className="ol-shuffle-card"
+                style={
+                  {
+                    ...cardFrame,
+                    left: cx,
+                    top: cy,
+                    width: SMALL_W,
+                    height: SMALL_H,
+                    zIndex: 13 + i,
+                    animationDelay: `${i * 25}ms`,
+                    boxShadow: '0 4px 10px rgba(0,0,0,0.45)',
+                    '--dx': `${dir * (SMALL_W * 0.55 + i * 3)}px`,
+                    '--rot': `${dir * (6 + i)}deg`,
+                    '--z1': 13 + (5 - i),
+                    '--z2': 13 + i,
+                  } as React.CSSProperties
+                }
+              >
+                {cardImage(undefined, top, false)}
+              </div>
+            );
+          })}
         <div style={{ ...pill, left: r.x + r.w / 2, top: side === 'me' ? r.y + SMALL_H + 14 : r.y + 8 }}>
           Biblioteca · {lib.count}
         </div>
