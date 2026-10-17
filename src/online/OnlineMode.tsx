@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowLeft, Globe, History, LogIn, Maximize, Minimize, Plus, Upload } from 'lucide-react';
+import { BookOpen, Gamepad2, Globe, History, KeyRound, Lock, LogIn, LogOut, Maximize, Minimize, PenLine, Plus, Swords, Upload } from 'lucide-react';
 import { IOS_FULLSCREEN_HINT, fullscreenSupported, toggleFullscreen, useIsFullscreen } from '../fullscreen';
 import type { CardTemplate } from '../types';
 import type { PeekResult, Seat, ServerLibrary, StateEffects } from './types';
@@ -19,23 +19,30 @@ import {
 interface OnlineModeProps {
   initialCode?: string;
   localLibrary: { templates: CardTemplate[]; backUrls: Record<string, string>; deckNames: Record<string, string> };
-  onExit: () => void;
+  editUnlocked: boolean;
+  onUnlockEdit: (key: string) => Promise<void>;
+  onLockEdit?: () => void;
+  onOpenSolo: () => void;
+  onOpenLibrary: () => void;
 }
 
 const EMPTY_LIBRARY: ServerLibrary = { deckNames: {}, templates: [], backs: {}, updatedAt: 0 };
 
-export const OnlineMode: React.FC<OnlineModeProps> = ({ initialCode, localLibrary, onExit }) => {
+export const OnlineMode: React.FC<OnlineModeProps> = ({ initialCode, localLibrary, editUnlocked, onUnlockEdit, onLockEdit, onOpenSolo, onOpenLibrary }) => {
   const [serverUrl, setServerUrl] = useState(getDefaultServerUrl);
   const [serverInput, setServerInput] = useState(serverUrl);
   const [name, setName] = useState(() => localStorage.getItem('online_name') || '');
   const [code, setCode] = useState(initialCode || '');
-  const joinFirst = code.trim().length > 0; // con código (p. ej. desde un enlace) se destaca Unirse
+  // Al entrar con un enlace de invitación solo se ofrece unirse a esa sala
+  const [invited, setInvited] = useState(() => !!initialCode);
   const [library, setLibrary] = useState<ServerLibrary>(EMPTY_LIBRARY);
   const [libraryError, setLibraryError] = useState<string | null>(null);
 
   const [adminKey, setAdminKey] = useState(() => localStorage.getItem('online_admin_key') || '');
   const [publishing, setPublishing] = useState<{ done: number; total: number } | null>(null);
-  const [showPublish, setShowPublish] = useState(false);
+  const [showEdit, setShowEdit] = useState(false);
+  const [editKey, setEditKey] = useState('');
+  const [checking, setChecking] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   // Biblioteca leída de la carpeta data/ del simulador (para publicar desde el navegador)
   const [folderLibrary, setFolderLibrary] = useState<OnlineModeProps['localLibrary'] | null>(null);
@@ -116,19 +123,11 @@ export const OnlineMode: React.FC<OnlineModeProps> = ({ initialCode, localLibrar
     return n;
   };
 
-  // El nombre se pide justo al crear la sala o al unirse
-  const [askName, setAskName] = useState<'create' | 'join' | null>(null);
-  const handleCreate = () => setAskName('create');
+  const handleCreate = () => game.connect(serverUrl, { t: 'create', name: rememberName() });
   const handleJoin = () => {
     const c = code.trim().toUpperCase();
     if (!c) return toast('Escribe el código de la sala');
-    setAskName('join');
-  };
-  const confirmName = () => {
-    const n = rememberName();
-    if (askName === 'create') game.connect(serverUrl, { t: 'create', name: n });
-    else if (askName === 'join') game.connect(serverUrl, { t: 'join', code: code.trim().toUpperCase(), name: n });
-    setAskName(null);
+    game.connect(serverUrl, { t: 'join', code: c, name: rememberName() });
   };
 
   const handleLeave = () => {
@@ -139,6 +138,7 @@ export const OnlineMode: React.FC<OnlineModeProps> = ({ initialCode, localLibrar
         game.leave();
         clearSalaFromUrl();
         setCode('');
+        setInvited(false);
       },
     });
   };
@@ -151,7 +151,6 @@ export const OnlineMode: React.FC<OnlineModeProps> = ({ initialCode, localLibrar
       await publishLibrary(serverUrl, adminKey, source, (done, total) => setPublishing({ done, total }));
       await loadLibrary(serverUrl);
       toast('Mazos publicados en el servidor');
-      setShowPublish(false);
     } catch (err) {
       toast(err instanceof Error ? err.message : 'No se pudieron publicar los mazos');
     } finally {
@@ -217,7 +216,9 @@ export const OnlineMode: React.FC<OnlineModeProps> = ({ initialCode, localLibrar
             confirmLabel="Volver"
             onConfirm={() => {
               game.leave();
-              onExit();
+              clearSalaFromUrl();
+              setCode('');
+              setInvited(false);
             }}
           />
         )}
@@ -242,38 +243,113 @@ export const OnlineMode: React.FC<OnlineModeProps> = ({ initialCode, localLibrar
     background: 'rgba(0,0,0,0.35)',
     color: '#fff',
     border: '1px solid var(--glass-border)',
-    borderRadius: 8,
-    padding: '10px 12px',
-    fontSize: '0.9rem',
+    borderRadius: 10,
+    padding: '12px 14px',
+    fontSize: '1rem',
     fontFamily: 'var(--font-family)',
     outline: 'none',
   };
-  const label: React.CSSProperties = { fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 6, display: 'block' };
+  const label: React.CSSProperties = { fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 6, display: 'block', fontWeight: 600, letterSpacing: 0.3 };
   const busy = game.status === 'connecting' || game.status === 'reconnecting';
+  const blocked = busy || !serverUrl || !!libraryError;
+
+  const nameField = (
+    <div>
+      <label style={label}>Tu nombre</label>
+      <input
+        style={inputStyle}
+        value={name}
+        maxLength={20}
+        placeholder="Nombre que verá tu rival"
+        onChange={(e) => setName(e.target.value)}
+        onKeyDown={(e) => e.key === 'Enter' && (invited ? handleJoin() : handleCreate())}
+      />
+    </div>
+  );
 
   return (
-    <div className="tabletop-container" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'default' }}>
-      <div className="glass-panel" style={{ width: 'min(440px, 92vw)', padding: 28, display: 'flex', flexDirection: 'column', gap: 18, maxHeight: '94vh', overflowY: 'auto' }}>
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-            <h1 style={{ fontSize: '1.4rem', fontWeight: 700, letterSpacing: '-0.5px' }}>
-              Aeterna <span style={{ color: 'var(--color-accent)' }}>Duellum</span> · Online
-            </h1>
-            <button
-              className="btn-secondary"
-              title="Pantalla completa"
-              style={{ padding: 8, flexShrink: 0 }}
-              onClick={async () => {
-                if (!fullscreenSupported()) return toast(IOS_FULLSCREEN_HINT);
-                if (!(await toggleFullscreen())) toast('El navegador no ha permitido la pantalla completa');
-              }}
-            >
-              {fullscreen ? <Minimize size={16} /> : <Maximize size={16} />}
-            </button>
+    <div className="tabletop-container landing" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'default', overflowY: 'auto' }}>
+      <button
+        className="btn-secondary"
+        title="Pantalla completa"
+        style={{ position: 'absolute', top: 14, right: 14, padding: 9 }}
+        onClick={async () => {
+          if (!fullscreenSupported()) return toast(IOS_FULLSCREEN_HINT);
+          if (!(await toggleFullscreen())) toast('El navegador no ha permitido la pantalla completa');
+        }}
+      >
+        {fullscreen ? <Minimize size={16} /> : <Maximize size={16} />}
+      </button>
+
+      <div style={{ width: 'min(420px, 92vw)', display: 'flex', flexDirection: 'column', gap: 22, padding: '28px 0' }}>
+        <div style={{ textAlign: 'center' }}>
+          <div className="landing-emblem">
+            <Swords size={30} />
           </div>
-          <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: 4 }}>
-            Partida 1 contra 1. Cada jugador ve solo su propia mano; del rival solo ves cuántas cartas tiene.
-          </p>
+          <h1 style={{ fontSize: '2rem', fontWeight: 800, letterSpacing: '-0.8px', lineHeight: 1.1, marginTop: 14 }}>
+            Aeterna <span className="landing-accent">Duellum</span>
+          </h1>
+          <p style={{ fontSize: '0.92rem', color: 'var(--text-muted)', marginTop: 8 }}>Duelos online 1 contra 1</p>
+        </div>
+
+        <div className="glass-panel" style={{ padding: 22, display: 'flex', flexDirection: 'column', gap: 16, borderRadius: 18 }}>
+          {invited ? (
+            <>
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Te han invitado a la sala</div>
+                <div className="landing-code">{code.trim().toUpperCase()}</div>
+              </div>
+              {nameField}
+              <button className="btn-primary landing-big" disabled={blocked} onClick={handleJoin}>
+                <LogIn size={18} /> Unirse a la partida
+              </button>
+              <button
+                className="btn-secondary"
+                onClick={() => {
+                  setInvited(false);
+                  setCode('');
+                  clearSalaFromUrl();
+                }}
+                style={{ padding: 8, fontSize: '0.8rem', background: 'transparent', border: 'none', color: 'var(--text-muted)' }}
+              >
+                Crear otra partida
+              </button>
+            </>
+          ) : (
+            <>
+              {nameField}
+              <button className="btn-primary landing-big" disabled={blocked} onClick={handleCreate}>
+                <Plus size={18} /> Crear partida
+              </button>
+              <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', textAlign: 'center', marginTop: -6 }}>
+                Te daremos un enlace para invitar a tu rival
+              </div>
+              <div className="landing-or">o únete con un código</div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input
+                  style={{ ...inputStyle, textTransform: 'uppercase', letterSpacing: 4, fontWeight: 700, textAlign: 'center' }}
+                  value={code}
+                  maxLength={5}
+                  placeholder="CÓDIGO"
+                  onChange={(e) => setCode(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleJoin()}
+                />
+                <button className="btn-secondary" disabled={blocked} onClick={handleJoin} style={{ padding: '8px 18px', fontSize: '0.95rem', flexShrink: 0 }}>
+                  <LogIn size={16} /> Unirse
+                </button>
+              </div>
+            </>
+          )}
+          {busy && <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', textAlign: 'center' }}>Conectando…</div>}
+          {game.fatalError && <div style={{ fontSize: '0.85rem', color: 'var(--color-danger)', textAlign: 'center' }}>{game.fatalError}</div>}
+          {(libraryError || !serverUrl) && (
+            <div style={{ fontSize: '0.8rem', color: 'var(--color-danger)', textAlign: 'center' }}>
+              {libraryError || 'Indica la dirección del servidor para empezar.'}
+            </div>
+          )}
+          {serverUrl && !libraryError && !libraryDecks && (
+            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textAlign: 'center' }}>El servidor todavía no tiene mazos publicados.</div>
+          )}
         </div>
 
         {!isServedByGameServer() && (
@@ -281,7 +357,7 @@ export const OnlineMode: React.FC<OnlineModeProps> = ({ initialCode, localLibrar
             <span style={label}>Servidor</span>
             <div style={{ display: 'flex', gap: 8 }}>
               <input
-                style={inputStyle}
+                style={{ ...inputStyle, fontSize: '0.85rem', padding: '9px 12px' }}
                 value={serverInput}
                 placeholder="https://tu-app.up.railway.app"
                 onChange={(e) => setServerInput(e.target.value)}
@@ -294,122 +370,114 @@ export const OnlineMode: React.FC<OnlineModeProps> = ({ initialCode, localLibrar
           </div>
         )}
 
-        <div style={{ fontSize: '0.8rem', color: libraryError ? 'var(--color-danger)' : 'var(--text-muted)' }}>
-          {!serverUrl
-            ? 'Indica la dirección del servidor para empezar.'
-            : libraryError
-              ? libraryError
-              : libraryDecks
-                ? `Mazos disponibles en el servidor: ${Object.values(library.deckNames).join(', ')}`
-                : 'El servidor todavía no tiene mazos publicados.'}
-        </div>
-
-        <button className={joinFirst ? 'btn-secondary' : 'btn-primary'} disabled={busy || !serverUrl || !!libraryError} onClick={handleCreate} style={{ padding: 12, fontSize: '0.95rem' }}>
-          <Plus size={16} /> Crear sala nueva
-        </button>
-
-        <div>
-          <label style={label}>¿Tienes un código de sala?</label>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <input
-              style={{ ...inputStyle, textTransform: 'uppercase', letterSpacing: 3, fontWeight: 700 }}
-              value={code}
-              maxLength={5}
-              placeholder="ABCDE"
-              onChange={(e) => setCode(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleJoin()}
-            />
-            <button className={joinFirst ? 'btn-primary' : 'btn-secondary'} disabled={busy || !serverUrl || !!libraryError} onClick={handleJoin} style={{ padding: '8px 16px', fontSize: '0.9rem' }}>
-              <LogIn size={14} /> Unirse
+        <div style={{ display: 'flex', justifyContent: 'center', gap: 10 }}>
+          {serverUrl && !libraryError && (
+            <button className="btn-secondary landing-link" onClick={() => setShowHistory(true)}>
+              <History size={15} /> Historial
             </button>
-          </div>
-        </div>
-
-        {busy && <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Conectando…</div>}
-        {game.fatalError && <div style={{ fontSize: '0.85rem', color: 'var(--color-danger)' }}>{game.fatalError}</div>}
-
-        {serverUrl && !libraryError && (
-          <div style={{ borderTop: '1px solid var(--glass-border)', paddingTop: 14 }}>
-            {!showPublish ? (
-              <button className="btn-secondary" onClick={() => setShowPublish(true)} style={{ width: '100%', padding: 8, fontSize: '0.8rem' }}>
-                <Upload size={14} /> Publicar mis mazos en el servidor
-              </button>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {localLibrary.templates.length === 0 && (
-                  <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', lineHeight: 1.45 }}>
-                    Elige la carpeta <strong>data</strong> que está junto al .exe del simulador:
-                    <input
-                      type="file"
-                      // @ts-expect-error atributo no estándar para elegir carpetas
-                      webkitdirectory=""
-                      multiple
-                      onChange={(e) => handleDataFolder(e.target.files)}
-                      style={{ display: 'block', marginTop: 6, color: '#fff' }}
-                    />
-                  </label>
-                )}
-                {localCount > 0 && <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', lineHeight: 1.45 }}>
-                  Sube tus {Object.keys(source.deckNames).length} mazos ({localCount} diseños) para que ambos jugadores puedan usarlos.
-                  Las imágenes se reducen antes de subirlas. Sustituye lo que hubiera publicado antes.
-                </p>}
-                <input
-                  style={inputStyle}
-                  type="password"
-                  value={adminKey}
-                  placeholder="Clave de administrador (ADMIN_KEY)"
-                  onChange={(e) => setAdminKey(e.target.value)}
-                />
-                <button className="btn-primary" disabled={!!publishing || localCount === 0} onClick={handlePublish} style={{ padding: 10, fontSize: '0.85rem' }}>
-                  {publishing ? `Subiendo… ${publishing.done}/${publishing.total}` : 'Publicar ahora'}
-                </button>
-              </div>
-            )}
-          </div>
-        )}
-
-        {serverUrl && !libraryError && (
-          <button className="btn-secondary" onClick={() => setShowHistory(true)} style={{ padding: 8, fontSize: '0.8rem' }}>
-            <History size={14} /> Historial de partidas
+          )}
+          <button className="btn-secondary landing-link" onClick={() => setShowEdit(true)}>
+            {editUnlocked ? <PenLine size={15} /> : <Lock size={15} />} Edición
           </button>
-        )}
-
-        <button
-          className="btn-secondary"
-          onClick={() => {
-            clearSalaFromUrl();
-            onExit();
-          }}
-          style={{ padding: 8, fontSize: '0.8rem' }}
-        >
-          <ArrowLeft size={14} /> Volver al modo un jugador
-        </button>
+        </div>
       </div>
-      {askName && (
+
+      {showEdit && (
         <div
-          onPointerDown={() => setAskName(null)}
+          onPointerDown={() => !publishing && setShowEdit(false)}
           style={{ position: 'fixed', inset: 0, background: 'rgba(5, 8, 16, 0.75)', backdropFilter: 'blur(6px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 900000 }}
         >
-          <form
+          <div
             className="glass-panel"
             onPointerDown={(e) => e.stopPropagation()}
-            onSubmit={(e) => {
-              e.preventDefault();
-              confirmName();
-            }}
-            style={{ width: 'min(360px, 90vw)', padding: 22, display: 'flex', flexDirection: 'column', gap: 12 }}
+            style={{ width: 'min(380px, 90vw)', padding: 22, display: 'flex', flexDirection: 'column', gap: 12, maxHeight: '92vh', overflowY: 'auto' }}
           >
-            <h3 style={{ fontSize: '1.05rem', fontWeight: 700 }}>¿Cómo te llamas?</h3>
-            <input autoFocus style={inputStyle} value={name} maxLength={20} placeholder="Nombre que verá tu rival" onChange={(e) => setName(e.target.value)} />
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button type="button" className="btn-secondary" onClick={() => setAskName(null)} style={{ flex: 1, padding: 10 }}>
-                Cancelar
-              </button>
-              <button type="submit" className="btn-primary" style={{ flex: 1, padding: 10 }}>
-                {askName === 'create' ? <><Plus size={15} /> Crear sala</> : <><LogIn size={15} /> Unirse</>}
-              </button>
-            </div>
-          </form>
+            {!editUnlocked ? (
+              <form
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  if (!editKey) return;
+                  setChecking(true);
+                  try {
+                    await onUnlockEdit(editKey);
+                    setAdminKey(editKey);
+                    setEditKey('');
+                  } catch (err) {
+                    toast(err instanceof Error ? err.message : 'Clave incorrecta');
+                  } finally {
+                    setChecking(false);
+                  }
+                }}
+                style={{ display: 'flex', flexDirection: 'column', gap: 12 }}
+              >
+                <h3 style={{ fontSize: '1.1rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <KeyRound size={18} /> Edición
+                </h3>
+                <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', lineHeight: 1.45 }}>
+                  Escribe la clave de administrador para abrir el modo un jugador y el editor de mazos.
+                </p>
+                <input autoFocus type="password" style={inputStyle} value={editKey} placeholder="Clave" onChange={(e) => setEditKey(e.target.value)} />
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button type="button" className="btn-secondary" onClick={() => setShowEdit(false)} style={{ flex: 1, padding: 10 }}>
+                    Cancelar
+                  </button>
+                  <button type="submit" className="btn-primary" disabled={checking || !editKey} style={{ flex: 1, padding: 10 }}>
+                    {checking ? 'Comprobando…' : 'Entrar'}
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <>
+                <h3 style={{ fontSize: '1.1rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <PenLine size={18} /> Edición
+                </h3>
+                <button className="btn-primary" onClick={onOpenSolo} style={{ padding: 12, fontSize: '0.95rem' }}>
+                  <Gamepad2 size={17} /> Modo un jugador
+                </button>
+                <button className="btn-secondary" onClick={onOpenLibrary} style={{ padding: 12, fontSize: '0.95rem' }}>
+                  <BookOpen size={17} /> Editor de mazos
+                </button>
+                {serverUrl && !libraryError && (
+                  <div style={{ borderTop: '1px solid var(--glass-border)', paddingTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {localLibrary.templates.length === 0 && (
+                      <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', lineHeight: 1.45 }}>
+                        Elige la carpeta <strong>data</strong> que está junto al .exe del simulador:
+                        <input
+                          type="file"
+                          // @ts-expect-error atributo no estándar para elegir carpetas
+                          webkitdirectory=""
+                          multiple
+                          onChange={(e) => handleDataFolder(e.target.files)}
+                          style={{ display: 'block', marginTop: 6, color: '#fff' }}
+                        />
+                      </label>
+                    )}
+                    {localCount > 0 && (
+                      <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', lineHeight: 1.45 }}>
+                        Sube tus {Object.keys(source.deckNames).length} mazos ({localCount} diseños) para que ambos jugadores puedan usarlos.
+                        Sustituye lo que hubiera publicado antes.
+                      </p>
+                    )}
+                    <button className="btn-secondary" disabled={!!publishing || localCount === 0} onClick={handlePublish} style={{ padding: 10, fontSize: '0.85rem' }}>
+                      <Upload size={15} /> {publishing ? `Subiendo… ${publishing.done}/${publishing.total}` : 'Publicar mis mazos en el servidor'}
+                    </button>
+                  </div>
+                )}
+                {onLockEdit && (
+                  <button
+                    className="btn-secondary"
+                    onClick={() => {
+                      onLockEdit();
+                      setShowEdit(false);
+                    }}
+                    style={{ padding: 8, fontSize: '0.8rem', background: 'transparent', border: 'none', color: 'var(--text-muted)' }}
+                  >
+                    <LogOut size={14} /> Salir de la edición
+                  </button>
+                )}
+              </>
+            )}
+          </div>
         </div>
       )}
       {toastMsg && <Toast message={toastMsg} />}

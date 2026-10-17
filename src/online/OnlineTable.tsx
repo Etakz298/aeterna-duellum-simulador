@@ -481,13 +481,14 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
   // Las cartas en juego se colocan en fila, alineadas y centradas. La x guardada
   // solo sirve para el orden (de izquierda a derecha vista por el dueño).
   const PLAY_MAX_X = PLAY_W - CARD_W;
-  const attachedTokenSize = TOKEN_SIZE * (compact ? 0.8 : 0.75);
+  // Tokens de una carta: proporción respecto al ancho de la carta (en móvil, como un círculo de habilidad)
+  const attachedTokenRatio = compact ? 0.22 : 0.23;
+  const attachedTokenSize = L.cardW * attachedTokenRatio;
   const PLAY_MID_Y = (PLAY_H - CARD_H) / 2;
-  // ¿Esta zona se ve girada (orden de derecha a izquierda)?
-  const mirroredPlay = (side: SideKey) => L.playCardPos(side, 0, 0).x > L.playCardPos(side, 100, 0).x;
+  // Las dos zonas de juego se ven en el mismo orden para los dos jugadores: la
+  // primera carta a la izquierda y las siguientes a su derecha.
   const playInViewOrder = (side: SideKey, list?: OnlinePlayCard[]) => {
-    const sorted = [...(list ?? (side === 'me' ? state.me : state.opp).play)].sort((a, b) => a.x - b.x || a.order - b.order);
-    return mirroredPlay(side) ? sorted.reverse() : sorted;
+    return [...(list ?? (side === 'me' ? state.me : state.opp).play)].sort((a, b) => a.x - b.x || a.order - b.order);
   };
   const playSlotsX = (side: SideKey, n: number) => {
     const r = zoneRect(side, 'play');
@@ -520,7 +521,6 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
     const at = clamp(index, 0, others.length);
     const ordered: (OnlinePlayCard | null)[] = [...others];
     ordered.splice(at, 0, null); // null = la carta que se coloca
-    if (mirroredPlay(side)) ordered.reverse();
     const n = ordered.length;
     const keyOf = (k: number) => (n === 1 ? PLAY_MAX_X / 2 : (k * PLAY_MAX_X) / (n - 1));
     const updates: { id: string; x: number }[] = [];
@@ -538,7 +538,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
   };
   // Jugar al final de la fila (a la derecha, vista por el dueño)
   const playAtEnd = (side: SideKey, msg: Record<string, unknown>) =>
-    placeInPlay(side, mirroredPlay(side) ? 0 : (side === 'me' ? state.me : state.opp).play.length, { msg });
+    placeInPlay(side, (side === 'me' ? state.me : state.opp).play.length, { msg });
 
   useEffect(() => {
     if (selectedId && !allPlay.some((c) => c.id === selectedId)) setSelectedId(null);
@@ -1563,7 +1563,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
             height: size,
             borderRadius: '50%',
             background: '#facc15',
-            border: '3px solid #000',
+            border: `${compact ? 2 : 3}px solid #000`,
             boxShadow: dragging ? '0 10px 18px rgba(0,0,0,0.6)' : '0 4px 10px rgba(0,0,0,0.6)',
             transform: dragging ? 'scale(1.15)' : 'none',
             transition: dragging ? 'transform 0.15s' : 'left 0.35s cubic-bezier(0.25, 0.8, 0.25, 1), top 0.35s cubic-bezier(0.25, 0.8, 0.25, 1), transform 0.15s',
@@ -1685,7 +1685,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
     const unseen = chats.filter((e) => !toastedChat.current.has(e.id));
     for (const e of unseen) toastedChat.current.add(e.id);
     if (solo || showLog) return;
-    const fresh = unseen.filter((e) => e.by && e.by !== state.you);
+    const fresh = unseen.filter((e) => e.by && e.by !== state.you && !e.reaction);
     if (!fresh.length) return;
     playChatSound();
     setChatToasts((prev) => [...prev, ...fresh.map((e) => ({ id: e.id, text: e.text }))].slice(-3));
@@ -1747,7 +1747,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
 
   const handRevealed = !!myInfo?.handRevealed;
   // Solo cuentan los mensajes del rival sin leer
-  const unread = showLog ? 0 : state.log.filter((e) => e.kind === 'chat' && e.by && e.by !== state.you && !seenChat.has(e.id)).length;
+  const unread = showLog ? 0 : state.log.filter((e) => e.kind === 'chat' && e.by && e.by !== state.you && !e.reaction && !seenChat.has(e.id)).length;
   const btn: React.CSSProperties = { padding: ui.pad, fontSize: ui.font };
   // La vista ampliada solo se muestra si la carta sigue donde estaba (y boca arriba)
   const hoverStillThere =
@@ -1813,7 +1813,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
             position: 'absolute',
             left: `${rx * 100}%`,
             top: `${ry * 100}%`,
-            width: '17%',
+            width: `${attachedTokenRatio * 100}%`,
             aspectRatio: '1',
             transform: `translate(-50%, -50%)${moving ? ' scale(1.15)' : ''}`,
             borderRadius: '50%',
@@ -2370,19 +2370,6 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
           </div>
         )}
 
-        {pointing && (
-          <div
-            className="glass-panel"
-            onPointerDown={(e) => e.stopPropagation()}
-            style={{ position: 'absolute', top: compact ? 8 : 12, left: '50%', transform: 'translateX(-50%)', zIndex: 660000, padding: '6px 8px 6px 14px', display: 'flex', alignItems: 'center', gap: 10, fontSize: compact ? 13 : 14, whiteSpace: 'nowrap', boxShadow: '0 10px 30px rgba(0,0,0,0.6)' }}
-          >
-            <Crosshair size={16} style={{ color: myBackColor || '#ef4444' }} />
-            <span>Toca hasta 3 cartas para señalar ({pointing.targets.length}/3)</span>
-            <button className="btn-primary" onClick={() => setPointing(null)} style={{ padding: '5px 12px', fontSize: 13 }}>
-              Listo
-            </button>
-          </div>
-        )}
 
         {/* Carta de vida ampliada (con su token); otro toque la cierra */}
         {lifeBig && (() => {
@@ -2597,7 +2584,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
               <EmojiPicker
                 big={compact}
                 onPick={(e) => {
-                  send({ t: 'chat', text: e });
+                  send({ t: 'chat', text: e, reaction: true });
                   setEmojiOpen(null);
                 }}
                 style={{ position: 'absolute', top: 'calc(100% + 6px)', right: 0, width: compact ? 330 : 300 }}

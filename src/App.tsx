@@ -14,7 +14,7 @@ import { RotateCw, RotateCcw, Eye, Shuffle, Trash2 } from 'lucide-react';
 import { OnlineMode } from './online/OnlineMode';
 import { SoloMode } from './local/SoloMode';
 import { loadStoredSession } from './online/useOnlineGame';
-import { fetchLibrary, getDefaultServerUrl } from './online/server';
+import { checkAdminKey, fetchLibrary, getDefaultServerUrl } from './online/server';
 
 // Un enlace de invitación (?sala=CODIGO) o una partida a medias abren el modo online
 const SYNC_KEY = 'server_library_synced';
@@ -27,6 +27,8 @@ interface ModalState {
   message: string;
   onConfirm?: () => void;
 }
+
+const EDIT_KEY = 'edit_admin_key';
 
 export default function App() {
   // Database Templates
@@ -86,9 +88,38 @@ export default function App() {
 
   // Modo: un jugador (mesa como la del 1 vs 1), biblioteca de mazos (la mesa libre
   // de siempre, con el menú para gestionar cartas) u online 1 vs 1
-  const [mode, setMode] = useState<'solo' | 'local' | 'online'>(() =>
-    initialSala || loadStoredSession() ? 'online' : 'solo'
+  // El modo un jugador y el editor de mazos solo se abren con la clave de
+  // administrador (botón «Edición»); la app de escritorio los tiene siempre.
+  const [editUnlocked, setEditUnlocked] = useState(
+    () => (typeof window !== 'undefined' && !!window.electronAPI) || !!localStorage.getItem(EDIT_KEY),
   );
+  const [mode, setMode] = useState<'solo' | 'local' | 'online'>(() =>
+    initialSala || loadStoredSession() || !editUnlocked ? 'online' : 'solo'
+  );
+  // Si la clave guardada ya no vale (se ha cambiado en el servidor), se vuelve a bloquear
+  useEffect(() => {
+    const key = localStorage.getItem(EDIT_KEY);
+    const url = getDefaultServerUrl();
+    if (!key || !url || window.electronAPI) return;
+    fetch(`${url}/api/admin/check`, { headers: { 'X-Admin-Key': key } })
+      .then((res) => {
+        if (res.status !== 401) return;
+        localStorage.removeItem(EDIT_KEY);
+        setEditUnlocked(false);
+        setMode('online');
+      })
+      .catch(() => {});
+  }, []);
+  const unlockEdit = async (key: string) => {
+    await checkAdminKey(getDefaultServerUrl(), key);
+    localStorage.setItem(EDIT_KEY, key);
+    localStorage.setItem('online_admin_key', key);
+    setEditUnlocked(true);
+  };
+  const lockEdit = () => {
+    localStorage.removeItem(EDIT_KEY);
+    setEditUnlocked(!!window.electronAPI);
+  };
   const [libraryLoaded, setLibraryLoaded] = useState(false);
   const syncingRef = useRef(false);
 
@@ -865,12 +896,16 @@ export default function App() {
 
   const hasSelection = selectedCardIds.size > 0 || selectedCounterIds.size > 0;
 
-  if (mode === 'online') {
+  if (mode === 'online' || !editUnlocked) {
     return (
       <OnlineMode
         initialCode={initialSala}
         localLibrary={{ templates, backUrls, deckNames }}
-        onExit={() => setMode('solo')}
+        editUnlocked={editUnlocked}
+        onUnlockEdit={unlockEdit}
+        onLockEdit={window.electronAPI ? undefined : lockEdit}
+        onOpenSolo={() => setMode('solo')}
+        onOpenLibrary={() => setMode('local')}
       />
     );
   }
