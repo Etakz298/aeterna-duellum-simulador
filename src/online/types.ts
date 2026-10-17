@@ -70,6 +70,7 @@ export interface OnlineState {
   starter?: Seat; // quién juega el primer turno
   started?: boolean; // ya se ha jugado alguna carta en esta partida
   oppSelected?: string | null; // carta en juego que tiene seleccionada el rival
+  pointer?: { from: string; targets: string[]; by: Seat; rev: number } | null; // carta que señala a otras
   me: OnlineSide;
   opp: OnlineSide;
   hand: OnlineHandCard[];

@@ -64,6 +64,7 @@ export class Game {
     // Quién juega el primer turno: al azar al crear la sala; cambia al terminar una partida
     this.starter = webcrypto.getRandomValues(new Uint8Array(1))[0] % 2 ? 'p2' : 'p1';
     this.started = false; // se ha jugado alguna carta en esta partida (oculta quién empieza)
+    this.pointer = null; // carta que señala a otras: { from, targets, by, rev }
     this.seq = 0;
     this.log = [];
     this.rev = 0;
@@ -173,6 +174,8 @@ export class Game {
       starter: this.starter,
       started: this.started,
       // Carta en juego que tiene seleccionada el rival
+      // Flechas de una carta que señala a otras (las dibujan los dos jugadores)
+      pointer: this.pointer || null,
       oppSelected: (() => {
         const id = this.players[opp]?.selected;
         return id && this.cards.get(id)?.zone === 'play' ? id : null;
@@ -314,6 +317,17 @@ export class Game {
     if (wasInPlay) {
       if (zone === 'play') for (const t of this.tokens) if (t.cardId === oldId) t.cardId = card.id;
       this.tokens = this.tokens.filter((t) => t.cardId !== oldId);
+      // Las flechas de "señalar" siguen a la carta en juego; si sale de la mesa se quitan
+      const p = this.pointer;
+      if (p) {
+        if (p.from === oldId) {
+          if (zone === 'play') p.from = card.id;
+          else this.pointer = null;
+        } else if (p.targets.includes(oldId)) {
+          p.targets = zone === 'play' ? p.targets.map((t) => (t === oldId ? card.id : t)) : p.targets.filter((t) => t !== oldId);
+          if (!p.targets.length) this.pointer = null;
+        }
+      }
     }
     return card;
   }
@@ -388,6 +402,30 @@ export class Game {
   }
 
   // La carta seleccionada se enseña al rival (solo cuál es, no qué carta es)
+  // Señalar: una carta en juego apunta a hasta 3 cartas en juego (por ejemplo, al atacar)
+  act_point(seat, msg) {
+    const from = this.cards.get(String(msg.from || ''));
+    if (!from || from.zone !== 'play') throw new Error('Solo se puede señalar con una carta en juego');
+    const targets = [...new Set((Array.isArray(msg.targets) ? msg.targets : []).map(String))]
+      .filter((id) => id !== from.id && this.cards.get(id)?.zone === 'play')
+      .slice(0, 3);
+    if (!targets.length) {
+      this.pointer = null;
+      return;
+    }
+    const prev = this.pointer && this.pointer.from === from.id && this.pointer.by === seat ? this.pointer : null;
+    this.pointRev = (this.pointRev || 0) + 1;
+    this.pointer = { from: from.id, targets, by: seat, rev: this.pointRev };
+    const text = `${this.nameOf(seat)} ha señalado ${targets.length === 1 ? 'una carta' : `${targets.length} cartas`} con una de sus cartas.`;
+    const last = this.log[this.log.length - 1];
+    // Mientras se van eligiendo objetivos se actualiza la misma línea del registro
+    if (prev && last && last.point) last.text = text;
+    else {
+      this.addLog(text);
+      this.log[this.log.length - 1].point = true;
+    }
+  }
+
   act_select(seat, msg) {
     const c = msg.id ? this.cards.get(msg.id) : null;
     this.players[seat].selected = c && c.zone === 'play' ? c.id : null;
@@ -562,6 +600,7 @@ export class Game {
       if (!this.free) this.players[s].deckId = null;
     }
     this.started = false;
+    this.pointer = null;
     this.cards.clear();
     this.tokens = [];
     this.life = { p1: LIFE_START, p2: LIFE_START };
