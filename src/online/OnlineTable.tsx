@@ -5,10 +5,10 @@ import {
   ArrowUp,
   BookOpen,
   Crosshair,
+  Swords,
   Copy,
   Eye,
   EyeOff,
-  Globe,
   History,
   Hand,
   Layers,
@@ -167,6 +167,10 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
   const [previewDrag, setPreviewDrag] = useState<{ id: string; rx: number; ry: number } | null>(null); // token movido en la vista ampliada
   const hoverHideTimer = useRef<number | undefined>(undefined);
   const [pickClosed, setPickClosed] = useState(false); // menú de elegir campeón cerrado a mano
+  // Un jugador: lado al que se le está eligiendo campeón (al empezar, primero el de abajo)
+  const [soloPick, setSoloPick] = useState<SideKey | null>(() =>
+    solo && !state.players.p1?.deckId && !state.players.p2?.deckId ? 'me' : null,
+  );
   useEffect(() => {
     if (!myInfo?.deckId) setPickClosed(false); // al reiniciar la partida se vuelve a preguntar
   }, [myInfo?.deckId]);
@@ -1860,32 +1864,6 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
     const sd = side === 'me' ? state.me : state.opp;
     return sd.library.count + sd.graveyard.length + sd.play.length + (side === 'me' ? state.hand.length : state.oppHand.length);
   };
-  const deckSelect = (side: SideKey, placeholder: string) => (
-    <select
-      value={state.players[seatOf(side)]?.deckId || ''}
-      onChange={(e) => pickDeck(side, e.target.value)}
-      style={{
-        flex: 1,
-        minWidth: 0,
-        background: 'rgba(0,0,0,0.35)',
-        color: '#fff',
-        border: '1px solid var(--glass-border)',
-        borderRadius: 6,
-        padding: 7,
-        fontSize: isTouch ? 16 : 14,
-        fontFamily: 'var(--font-family)',
-      }}
-    >
-      <option value="" disabled>
-        {Object.keys(library.deckNames).length ? placeholder : solo ? 'No hay mazos con cartas' : 'No hay mazos publicados'}
-      </option>
-      {Object.entries(library.deckNames).map(([id, name]) => (
-        <option key={id} value={id}>
-          {name} ({library.templates.filter((t) => t.deckId === id && !t.isLife).reduce((s, t) => s + (t.quantity || 1), 0)})
-        </option>
-      ))}
-    </select>
-  );
   // Elegir mazo lo pone ya barajado en la biblioteca
   const pickDeck = (side: SideKey, deckId: string) => {
     const go = () => {
@@ -1898,6 +1876,29 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
     else go();
   };
 
+  // Campeón de un lado en el panel de un jugador: su reverso, nombre y botón para cambiarlo
+  const soloSeat = (side: SideKey) => {
+    const p = state.players[seatOf(side)];
+    const deckId = p?.deckId;
+    const cover = deckId ? library.backs[`backA-${deckId}`] || library.backs[`backB-${deckId}`] : undefined;
+    const life = deckId ? lifeOf(side) : null;
+    return (
+      <button key={side} className="ol-solo-seat" onClick={() => setSoloPick(side)} title="Elegir o cambiar el campeón">
+        <span className="ol-solo-cover" style={{ boxShadow: deckId ? `0 0 0 2px ${(side === 'me' ? myBackColor : oppBackColor) || 'transparent'}` : undefined }}>
+          {cover ? <img src={cover} alt="" /> : <Layers size={16} />}
+        </span>
+        <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
+          <span style={{ fontSize: isTouch ? 13 : 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+            {p?.name} · {side === 'me' ? 'abajo' : 'arriba'}
+          </span>
+          <strong style={{ fontSize: isTouch ? 17 : 15, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%' }}>
+            {deckId ? library.deckNames[deckId] || 'Mazo' : 'Elegir campeón'}
+          </strong>
+        </span>
+        {life !== null ? <span className="ol-solo-life">{life}</span> : <Swords size={16} style={{ color: 'var(--color-accent)' }} />}
+      </button>
+    );
+  };
   const soloPanel = (
     <div
       className="glass-panel"
@@ -1906,34 +1907,16 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
     >
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div style={{ fontSize: 20, fontWeight: 700, color: '#fff' }}>Un jugador</div>
-        {fullscreenBtn}
-      </div>
-      <div style={{ display: 'flex', gap: 6 }}>
-        <button className="btn-secondary" onClick={onLeave} title="Gestionar mazos, cartas y dorsos" style={{ ...btn, flex: 1 }}>
-          <BookOpen size={14} /> Mazos
-        </button>
-        {onOpenOnline && (
-          <button className="btn-secondary" onClick={onOpenOnline} title="Jugar online contra otra persona" style={{ ...btn, flex: 1 }}>
-            <Globe size={14} /> Online 1 vs 1
+        <div style={{ display: 'flex', gap: 6 }}>
+          <button className="btn-secondary" onClick={onLeave} title="Editor de mazos" style={btn}>
+            <BookOpen size={14} /> Mazos
           </button>
-        )}
+          {fullscreenBtn}
+        </div>
       </div>
-      {(['opp', 'me'] as SideKey[]).map((side) => {
-        return (
-          <div key={side} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <span style={{ fontSize: isTouch ? 15 : 12, color: 'var(--text-muted)' }}>
-              {state.players[seatOf(side)]?.name} ({side === 'me' ? 'abajo' : 'arriba'})
-            </span>
-            <div style={{ display: 'flex', gap: 6 }}>
-              {deckSelect(side, 'Elige mazo…')}
-            </div>
-          </div>
-        );
-      })}
+      {soloSeat('opp')}
+      {soloSeat('me')}
       <div style={{ height: 1, background: 'var(--glass-border)' }} />
-      <button className="btn-secondary" onClick={() => setShowLog((v) => !v)} style={btn}>
-        <MessageSquare size={14} /> Registro
-      </button>
       <div style={{ display: 'flex', gap: 6 }}>
         <button className="btn-primary" onClick={() => setShowEnd(true)} style={{ ...btn, flex: 1 }} title="Registrar qué campeón ha ganado">
           <Trophy size={14} /> Terminar partida
@@ -1942,13 +1925,23 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
           <History size={14} /> Historial
         </button>
       </div>
-      <button
-        className="btn-danger"
-        onClick={() => confirm('Reiniciar mesa', 'Se retirarán todas las cartas y tokens de los dos jugadores y las vidas volverán a 10. ¿Seguro?', () => send({ t: 'reset' }))}
-        style={btn}
-      >
-        Reiniciar
-      </button>
+      <div style={{ display: 'flex', gap: 6 }}>
+        <button className="btn-secondary" onClick={() => setShowLog((v) => !v)} style={{ ...btn, flex: 1 }}>
+          <MessageSquare size={14} /> Registro
+        </button>
+        <button
+          className="btn-danger"
+          onClick={() => confirm('Reiniciar mesa', 'Se retirarán todas las cartas y tokens de los dos jugadores y las vidas volverán a 10. ¿Seguro?', () => send({ t: 'reset' }))}
+          style={{ ...btn, flex: 1 }}
+        >
+          Reiniciar
+        </button>
+      </div>
+      {onOpenOnline && (
+        <button className="btn-danger" onClick={onOpenOnline} title="Volver a la portada" style={btn}>
+          <LogOut size={14} /> Salir
+        </button>
+      )}
     </div>
   );
 
@@ -2282,7 +2275,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
           {ghost()}
           {solo && cardsOf('me') + cardsOf('opp') === 0 && (
             <div style={{ position: 'absolute', left: SIDE_W, top: L.boardH / 2 - 20, width: PLAY_W, textAlign: 'center', color: 'rgba(255,255,255,0.4)', fontSize: 22, pointerEvents: 'none' }}>
-              Elige un mazo para cada jugador en el panel y pulsa el botón de al lado para ponerlo barajado
+              Elige el campeón de cada jugador en el panel para empezar
             </div>
           )}
           {/* Quién empieza el primer turno; pulsarlo cambia al otro jugador */}
@@ -2715,14 +2708,22 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
 
       {/* Fin de partida: quién ha ganado */}
       {/* Al entrar en la sala: elegir campeón y queda todo listo para jugar */}
-      {!solo && !myInfo?.deckId && !pickClosed && Object.keys(library.deckNames).length > 0 && (
-        <Overlay onClose={() => setPickClosed(true)}>
-          <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: 4 }}>Elige tu campeón</h3>
+      {((!solo && !myInfo?.deckId && !pickClosed) || (solo && soloPick)) && Object.keys(library.deckNames).length > 0 && (() => {
+        const side: SideKey = solo ? soloPick! : 'me';
+        const other = state.players[seatOf(side === 'me' ? 'opp' : 'me')];
+        const close = () => (solo ? setSoloPick(null) : setPickClosed(true));
+        return (
+        <Overlay onClose={close}>
+          <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: 4 }}>
+            {solo ? `Campeón de ${state.players[seatOf(side)]?.name} (${side === 'me' ? 'abajo' : 'arriba'})` : 'Elige tu campeón'}
+          </h3>
           <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 14 }}>
-            Tu mazo se pondrá barajado y listo para empezar.{' '}
-            <button className="btn-secondary" onClick={onReloadLibrary} title="Recargar mazos del servidor" style={{ padding: '2px 8px', fontSize: 12, verticalAlign: 'middle' }}>
-              <RefreshCw size={12} /> Recargar
-            </button>
+            {solo ? 'Su mazo se pondrá barajado y listo para empezar.' : 'Tu mazo se pondrá barajado y listo para empezar.'}{' '}
+            {!solo && (
+              <button className="btn-secondary" onClick={onReloadLibrary} title="Recargar mazos del servidor" style={{ padding: '2px 8px', fontSize: 12, verticalAlign: 'middle' }}>
+                <RefreshCw size={12} /> Recargar
+              </button>
+            )}
           </p>
           <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap', maxHeight: compact ? 'calc(var(--app-h, 100vh) - 150px)' : '70vh', overflowY: 'auto' }}>
             {Object.entries(library.deckNames).map(([id, name]) => {
@@ -2730,14 +2731,22 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
               // Reverso del mazo (siempre el tipo A; el B si no hay A)
               const cover = library.backs[`backA-${id}`] || library.backs[`backB-${id}`];
               const count = tpls.filter((t) => !t.isLife).reduce((n, t) => n + (t.quantity || 1), 0);
-              const taken = oppInfo?.deckId === id;
+              const taken = !solo && oppInfo?.deckId === id;
+              const current = state.players[seatOf(side)]?.deckId === id;
+              const note = taken ? 'Lo usa tu rival' : solo && other?.deckId === id ? `Lo usa ${other.name}` : current ? 'Elegido' : `${count} cartas`;
               return (
                 <button
                   key={id}
                   className="btn-secondary ol-champion"
                   disabled={taken || count === 0}
-                  onClick={() => pickDeck('me', id)}
-                  style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, padding: 8, width: compact ? 112 : 170, opacity: taken || count === 0 ? 0.45 : 1 }}
+                  onClick={() => {
+                    if (!current) pickDeck(side, id);
+                    if (!solo) return;
+                    // Después del de abajo, el de arriba (si aún no tiene)
+                    const next = side === 'me' && !state.players[seatOf('opp')]?.deckId ? 'opp' : null;
+                    setSoloPick(next);
+                  }}
+                  style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, padding: 8, width: compact ? 112 : 170, opacity: taken || count === 0 ? 0.45 : 1, outline: current ? '2px solid var(--color-accent)' : undefined }}
                 >
                   {cover ? (
                     <img src={cover} alt={name} style={{ width: '100%', aspectRatio: `${CARD_W} / ${CARD_H}`, objectFit: 'cover', borderRadius: 8 }} />
@@ -2747,13 +2756,14 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
                     </div>
                   )}
                   <span style={{ fontWeight: 700, fontSize: compact ? 14 : 15 }}>{name}</span>
-                  <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{taken ? 'Lo usa tu rival' : `${count} cartas`}</span>
+                  <span style={{ fontSize: 12, color: current ? 'var(--color-accent)' : 'var(--text-muted)' }}>{note}</span>
                 </button>
               );
             })}
           </div>
         </Overlay>
-      )}
+        );
+      })()}
 
       {showEnd && (
         <Overlay onClose={() => setShowEnd(false)}>
