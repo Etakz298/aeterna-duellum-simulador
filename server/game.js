@@ -622,5 +622,7 @@ export class Game {
     const text = String(msg.text || '').trim().slice(0, 300);
     if (!text) return;
     this.addLog(`${this.nameOf(seat)}: ${text}`, 'chat', seat);
+    // Emojis enviados desde el botón de la mesa: el rival ya los ve en grande, sin aviso
+    if (msg.reaction) this.log[this.log.length - 1].reaction = true;
   }
 }

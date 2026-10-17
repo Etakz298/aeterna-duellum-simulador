@@ -688,3 +688,61 @@ html.rot-landscape #root {
   86% { transform: translate(calc(var(--dx) * 0.4), -2px); }
   100% { transform: none; }
 }
+
+/* ---------- Portada (crear o unirse a una partida) ---------- */
+.landing {
+  background:
+    radial-gradient(ellipse 70% 50% at 50% 0%, rgba(168, 85, 247, 0.22), transparent 70%),
+    radial-gradient(ellipse 60% 45% at 50% 100%, rgba(99, 102, 241, 0.16), transparent 70%),
+    var(--bg-tabletop);
+}
+.landing-emblem {
+  width: 64px;
+  height: 64px;
+  margin: 0 auto;
+  border-radius: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  background: linear-gradient(135deg, var(--color-primary), var(--color-accent));
+  box-shadow: 0 10px 30px var(--color-accent-glow);
+}
+.landing-accent {
+  background: linear-gradient(135deg, #c084fc, var(--color-accent));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.landing-big {
+  padding: 15px;
+  font-size: 1.05rem;
+  font-weight: 700;
+  border-radius: 12px;
+}
+.landing-code {
+  font-size: 2.2rem;
+  font-weight: 800;
+  letter-spacing: 8px;
+  margin-top: 4px;
+  color: #fff;
+}
+.landing-or {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+.landing-or::before,
+.landing-or::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--glass-border);
+}
+.landing-link {
+  padding: 8px 14px;
+  font-size: 0.85rem;
+  border-radius: 999px;
+}

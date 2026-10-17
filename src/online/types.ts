@@ -51,6 +51,7 @@ export interface LogEntry {
   text: string;
   by?: Seat; // quién escribió (mensajes de chat)
   audio?: { id: string; dur: number; wave: number[]; heard?: boolean }; // mensaje de voz
+  reaction?: boolean; // emojis enviados desde el botón de la mesa (sin aviso)
 }
 
 export interface OnlineToken {
