@@ -4,6 +4,7 @@ import {
   ArrowDown,
   ArrowUp,
   BookOpen,
+  Crosshair,
   Copy,
   Eye,
   EyeOff,
@@ -172,6 +173,11 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
   const [previewBig, setPreviewBig] = useState(false); // vista previa tocada: a pantalla grande
   const pressTimer = useRef<number | undefined>(undefined);
   const [selectedHandId, setSelectedHandId] = useState<string | null>(null);
+  // Móvil: el menú de la carta sale al volver a tocar la carta ya seleccionada
+  const [cardMenu, setCardMenu] = useState<string | null>(null);
+  // Señalar: la carta `from` apunta a las cartas que se van tocando (hasta 3)
+  const [pointing, setPointing] = useState<{ from: string; targets: string[] } | null>(null);
+  const [hiddenPointRev, setHiddenPointRev] = useState(-1);
   const [selectedTokenId, setSelectedTokenId] = useState<string | null>(null);
   const [portrait, setPortrait] = useState(false);
 
@@ -238,6 +244,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
   };
   const clearSelections = () => {
     setSelectedId(null);
+    setCardMenu(null);
     setSelectedHandId(null);
     setSelectedTokenId(null);
     setLifeSel(null);
@@ -573,6 +580,26 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
     sendAs(selectedSide, { t: 'move', id: selectedCard.id, to });
     setSelectedId(null);
   };
+  const startPointing = () => {
+    if (!selectedCard) return;
+    setPointing({ from: selectedCard.id, targets: [] });
+    setSelectedId(null);
+    setCardMenu(null);
+  };
+  // Las flechas se quitan solas a los 5 segundos del último cambio
+  const pointer = state.pointer;
+  useEffect(() => {
+    if (!pointer) return;
+    const rev = pointer.rev;
+    const t = window.setTimeout(() => {
+      setHiddenPointRev(rev);
+      setPointing((p) => (p && p.targets.length ? null : p));
+    }, 5000);
+    return () => window.clearTimeout(t);
+  }, [pointer?.rev]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (pointing && !allPlay.some((c) => c.id === pointing.from)) setPointing(null);
+  });
   // Al tocar rápido +/− el servidor responde con valores intermedios ya viejos: se muestra el último
   // valor pulsado hasta que el servidor lo confirma, así el contador no salta hacia atrás y hacia delante
   const setLife = (side: SideKey, value: number) => {
@@ -601,7 +628,10 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
     else if (k === 't') tokenOnCard();
     else if (k === 'h') moveSelected('hand');
     else if (k === 'g' || k === 'delete' || k === 'backspace') moveSelected('graveyard');
-    else if (k === 'escape') setSelectedId(null);
+    else if (k === 'escape') {
+      setSelectedId(null);
+      setPointing(null);
+    }
     else return;
     e.preventDefault();
   };
@@ -623,7 +653,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
     dragRef.current = d;
     setDrag(d);
     window.clearTimeout(pressTimer.current);
-    if (e.pointerType === 'touch') {
+    if (e.pointerType === 'touch' && !pointing) {
       // Tocar una carta con el dedo: vista ampliada al momento (se quita si se arrastra)
       if (previewTemplateId) {
         window.clearTimeout(previewTimer.current);
@@ -640,10 +670,23 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
     if (src.kind === 'view') return;
     if (!d.moved) {
       // Clic (o toque) sin arrastrar
+      if (pointing && src.kind === 'play') {
+        // Eligiendo a qué cartas señalar
+        if (src.id === pointing.from) return;
+        const targets = pointing.targets.includes(src.id) ? pointing.targets.filter((t) => t !== src.id) : [...pointing.targets, src.id].slice(0, 3);
+        send({ t: 'point', from: pointing.from, targets });
+        setPointing(targets.length >= 3 ? null : { ...pointing, targets });
+        return;
+      }
       const wasToken = selectedTokenId;
+      const again = src.kind === 'play' && selectedId === src.id;
+      const menuWasOpen = cardMenu === selectedId;
       clearSelections();
       if (src.kind === 'library') draw(src.side);
-      else if (src.kind === 'play') setSelectedId(src.id);
+      else if (src.kind === 'play') {
+        setSelectedId(src.id);
+        if (again && !menuWasOpen) setCardMenu(src.id);
+      }
       else if (src.kind === 'token') setSelectedTokenId(wasToken === src.id ? null : src.id);
       return;
     }
@@ -1954,6 +1997,11 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
       <button className="btn-secondary" onClick={() => moveSelected('graveyard')} title="Al cementerio (G)" style={btn}>
         <Archive size={ui.icon} /> Cementerio
       </button>
+      {canControl(selectedSide) && (
+        <button className="btn-secondary" onClick={startPointing} title="Señalar hasta 3 cartas con flechas" style={btn}>
+          <Crosshair size={ui.icon} /> Señalar
+        </button>
+      )}
     </div>
   );
 
@@ -1963,7 +2011,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
   let barTitle = '';
   let barContent: React.ReactNode = null;
   if (compact) {
-    if (selectedCard) {
+    if (selectedCard && cardMenu === selectedCard.id) {
       barTitle = 'Carta';
       barContent = (
         <>
@@ -1978,6 +2026,11 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
           <button className="btn-secondary" onClick={() => moveSelected('graveyard')} style={barBtn}>
             <Archive size={16} /> Cementerio
           </button>
+          {canControl(selectedSide) && (
+            <button className="btn-secondary" onClick={startPointing} style={barBtn}>
+              <Crosshair size={16} /> Señalar
+            </button>
+          )}
         </>
       );
     } else if (selectedHand || selectedOppHand) {
@@ -2054,6 +2107,59 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
     }
   }
 
+  // Flechas de "señalar": de la carta que señala a cada objetivo, con el color de su campeón
+  const pointerArrows = () => {
+    const p = pointer && pointer.rev !== hiddenPointRev ? pointer : null;
+    const src = pointing ? playLayout.get(pointing.from) : null;
+    if (!p && !src) return null;
+    const center = (id: string) => {
+      const r = playLayout.get(id);
+      return r ? { x: r.x + L.cardW / 2, y: r.y + L.cardH / 2 } : null;
+    };
+    const color = (p ? (p.by === seatOf('me') ? myBackColor : oppBackColor) : myBackColor) || '#ef4444';
+    const paths: { key: string; d: string }[] = [];
+    if (p) {
+      const a = center(p.from);
+      if (a)
+        for (const t of p.targets) {
+          const b = center(t);
+          if (!b) continue;
+          const len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+          const ux = (b.x - a.x) / len;
+          const uy = (b.y - a.y) / len;
+          // Sale del borde de la carta y la punta se queda sobre el objetivo
+          const sx = a.x + ux * L.cardH * 0.3;
+          const sy = a.y + uy * L.cardH * 0.3;
+          const ex = b.x - ux * L.cardH * 0.18;
+          const ey = b.y - uy * L.cardH * 0.18;
+          // Un poco curvada
+          const bend = Math.min(80, len * 0.18);
+          const cx = (sx + ex) / 2 - uy * bend;
+          const cy = (sy + ey) / 2 + ux * bend;
+          paths.push({ key: `${p.from}-${t}`, d: `M ${sx} ${sy} Q ${cx} ${cy} ${ex} ${ey}` });
+        }
+    }
+    return (
+      <svg width={BOARD_W} height={L.boardH} style={{ position: 'absolute', left: 0, top: 0, pointerEvents: 'none', zIndex: 440000, overflow: 'visible', color }}>
+        <defs>
+          <marker id="ol-arrow-head" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="4" markerHeight="4" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor" />
+          </marker>
+        </defs>
+        {src && pointing && (
+          <circle className="ol-point-src" cx={src.x + L.cardW / 2} cy={src.y + L.cardH / 2} r={L.cardH * 0.36} fill="none" stroke="currentColor" strokeWidth={5} />
+        )}
+        {paths.map((a) => (
+          <g key={a.key}>
+            <path d={a.d} fill="none" stroke="rgba(0,0,0,0.55)" strokeWidth={16} strokeLinecap="round" className="ol-arrow-draw" pathLength={1} />
+            <path d={a.d} fill="none" stroke="currentColor" strokeWidth={9} strokeLinecap="round" markerEnd="url(#ol-arrow-head)" className="ol-arrow-draw" pathLength={1} />
+            <path d={a.d} fill="none" stroke="rgba(255,255,255,0.75)" strokeWidth={3} strokeLinecap="round" strokeDasharray="10 22" className="ol-arrow-flow" />
+          </g>
+        ))}
+      </svg>
+    );
+  };
+
   return (
     <div className="tabletop-container" style={{ width: '100%', height: '100%', cursor: 'default', userSelect: 'none' }}>
       <div className="tabletop-grid" />
@@ -2072,6 +2178,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
         }}
         onPointerDown={() => {
           clearSelections();
+          setPointing(null);
           // Tocar el tablero vacío también quita la carta ampliada
           hidePressPreview();
         }}
@@ -2106,6 +2213,7 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
           {playCards('opp')}
           {playCards('me')}
           {selectionBar}
+          {pointerArrows()}
           {tokens}
           {ghost()}
           {solo && cardsOf('me') + cardsOf('opp') === 0 && (
@@ -2213,6 +2321,20 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
             {barContent}
             <button className="btn-secondary" onClick={clearSelections} style={{ padding: 8 }} title="Cerrar">
               <X size={16} />
+            </button>
+          </div>
+        )}
+
+        {pointing && (
+          <div
+            className="glass-panel"
+            onPointerDown={(e) => e.stopPropagation()}
+            style={{ position: 'absolute', top: compact ? 8 : 12, left: '50%', transform: 'translateX(-50%)', zIndex: 660000, padding: '6px 8px 6px 14px', display: 'flex', alignItems: 'center', gap: 10, fontSize: compact ? 13 : 14, whiteSpace: 'nowrap', boxShadow: '0 10px 30px rgba(0,0,0,0.6)' }}
+          >
+            <Crosshair size={16} style={{ color: myBackColor || '#ef4444' }} />
+            <span>Toca hasta 3 cartas para señalar ({pointing.targets.length}/3)</span>
+            <button className="btn-primary" onClick={() => setPointing(null)} style={{ padding: '5px 12px', fontSize: 13 }}>
+              Listo
             </button>
           </div>
         )}
