@@ -122,8 +122,8 @@ export interface ServerLibrary {
 // ---------- Partidas de 3 jugadores (todos contra todos) y 2 contra 2 ----------
 
 export interface MultiSide {
-  library: { count: number; top: CardBackInfo | null; shuffles?: number };
-  graveyard: (CardBackInfo & { id: string })[];
+  library: { count: number; top: (CardBackInfo & { templateId?: string }) | null; shuffles?: number };
+  graveyard: (CardBackInfo & { id: string; templateId?: string })[];
   play: OnlinePlayCard[];
   // Mano: la propia con id y templateId; la de los demás solo con el reverso (salvo la Especial)
   hand: (CardBackInfo & { id?: string; templateId?: string; isSpecial?: boolean })[];

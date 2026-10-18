@@ -76,8 +76,8 @@ export const clamp = (n: number, min: number, max: number) => Math.max(min, Math
 // se envían siguen siendo las de la mesa normal; esto solo cambia cómo se pinta.
 
 export const COMPACT_PLAY = 0.65; // tamaño de las cartas en juego en móvil
-const C_PLAY_H = Math.round(PLAY_H * COMPACT_PLAY); // 208
-const C_BOARD_H = 2 * ROW_H + 2 * 10 + 2 * C_PLAY_H + ZONE_GAP; // 856
+export const C_PLAY_H = Math.round(PLAY_H * COMPACT_PLAY); // 208
+export const C_BOARD_H = 2 * ROW_H + 2 * 10 + 2 * C_PLAY_H + ZONE_GAP; // 856
 
 // Puntos de corte en vertical (mesa normal → mesa de móvil)
 const STD_Y = [0, ROW_H, ROW_H + 10, ROW_H + 10 + PLAY_H, BOARD_H - ROW_H - 10 - PLAY_H, BOARD_H - ROW_H - 10, BOARD_H - ROW_H, BOARD_H];

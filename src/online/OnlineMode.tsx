@@ -204,6 +204,8 @@ export const OnlineMode: React.FC<OnlineModeProps> = ({ initialCode, localLibrar
             library={library}
             serverUrl={serverUrl}
             send={game.send}
+            patchState={(fn) => game.setState((s) => (s ? (fn(s as unknown as MultiState) as unknown as typeof s) : s))}
+            selectRequest={selectRequest}
             peek={peek}
             onClosePeek={() => setPeek(null)}
             onPeekTaken={(id) => setPeek((p) => (p ? { ...p, cards: p.cards.filter((c) => c.id !== id) } : p))}
