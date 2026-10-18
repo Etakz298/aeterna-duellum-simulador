@@ -2698,7 +2698,11 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
         const side: SideKey = solo ? soloPick! : 'me';
         const other = state.players[seatOf(side === 'me' ? 'opp' : 'me')];
         const close = () => (solo ? setSoloPick(null) : setPickClosed(true));
-        const champH = compact ? 'min(230px, calc(var(--app-h, 100vh) - 132px))' : 'min(270px, calc(var(--app-h, 100vh) - 170px))';
+        // Alto de los reversos: que quepan todos en una fila y la ventana entera sin desplazarse
+        // (en el móvil en vertical la mesa va girada y queda muy poco alto)
+        const nDecks = Math.max(1, Object.keys(library.deckNames).length);
+        const fitRow = `calc(((min(900px, var(--app-w, 100vw) * 0.94) - ${compact ? 60 : 110}px) / ${nDecks} - ${compact ? 22 : 30}px) * ${CARD_H / CARD_W})`;
+        const champH = compact ? `min(210px, calc(var(--app-h, 100vh) - 150px), ${fitRow})` : `min(270px, calc(var(--app-h, 100vh) - 170px), ${fitRow})`;
         return (
         <Overlay onClose={close}>
           <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: 4 }}>
