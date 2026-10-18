@@ -10,7 +10,6 @@ import {
   Crosshair,
   Swords,
   Copy,
-  Eye,
   EyeOff,
   Hand,
   Shrink,
@@ -762,11 +761,6 @@ export const MultiTable: React.FC<MultiTableProps> = ({
     const p = lifePending[side];
     return p ? p.value : state.lives[seatOf(side)] ?? 10;
   };
-  // Enseñar la mano pide confirmación; ocultarla no
-  const toggleHand = () => {
-    if (handRevealed) send({ t: 'showHand', value: false });
-    else confirm('Enseñar tu mano', 'Los demás jugadores verán todas las cartas de tu mano hasta que la vuelvas a ocultar. ¿Seguro?', () => send({ t: 'showHand', value: true }));
-  };
 
   // Teclado
   const keyRef = useRef<(e: KeyboardEvent) => void>(() => {});
@@ -1348,17 +1342,6 @@ export const MultiTable: React.FC<MultiTableProps> = ({
                 style={smallBtn}
               >
                 {fanOpen ? <Shrink size={ui.icon} /> : <UnfoldHorizontal size={ui.icon} />} {narrow || compact ? '' : fanOpen ? 'Juntar' : 'Separar'}
-              </button>
-            )}
-            {!compact && (
-              <button
-                className={handRevealed ? 'btn-primary' : 'btn-secondary'}
-                onPointerDown={(e) => e.stopPropagation()}
-                onClick={toggleHand}
-                title={handRevealed ? 'Volver a ocultar tu mano' : 'Enseñar todas las cartas de tu mano a los demás hasta que la vuelvas a ocultar'}
-                style={smallBtn}
-              >
-                {handRevealed ? <EyeOff size={ui.icon} /> : <Eye size={ui.icon} />} {narrow ? '' : handRevealed ? 'Ocultar mi mano' : 'Enseñar mi mano'}
               </button>
             )}
           </div>
@@ -2032,9 +2015,6 @@ export const MultiTable: React.FC<MultiTableProps> = ({
           <Users size={ui.icon} /> Cambiar grupos
         </button>
       )}
-      <button className={handRevealed ? 'btn-primary' : 'btn-secondary'} onClick={toggleHand} style={btn}>
-        {handRevealed ? <EyeOff size={ui.icon} /> : <Eye size={ui.icon} />} {handRevealed ? 'Ocultar mi mano' : 'Enseñar mi mano a los demás'}
-      </button>
       <div style={{ height: 1, background: 'var(--glass-border)' }} />
       <div style={{ display: 'flex', gap: 6 }}>
         <button className="btn-primary" onClick={() => setShowEnd(true)} disabled={joined < 2} style={{ ...btn, flex: 1, opacity: joined >= 2 ? 1 : 0.5 }} title="Decir quién ha ganado">

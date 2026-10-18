@@ -7,7 +7,6 @@ import {
   Crosshair,
   Swords,
   Copy,
-  Eye,
   EyeOff,
   History,
   Hand,
@@ -614,11 +613,6 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
     const p = lifePending[side];
     return p ? p.value : side === 'me' ? state.life.me : state.life.opp;
   };
-  // Enseñar la mano pide confirmación; ocultarla no
-  const toggleHand = () => {
-    if (handRevealed) send({ t: 'showHand', value: false });
-    else confirm('Enseñar tu mano', 'Tu rival verá todas las cartas de tu mano hasta que la vuelvas a ocultar. ¿Seguro?', () => send({ t: 'showHand', value: true }));
-  };
 
   // Teclado
   const keyRef = useRef<(e: KeyboardEvent) => void>(() => {});
@@ -1185,17 +1179,6 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
                   <EyeOff size={ui.icon} /> Jugar boca abajo
                 </button>
               </>
-            )}
-            {!solo && !compact && (
-              <button
-                className={handRevealed ? 'btn-primary' : 'btn-secondary'}
-                onPointerDown={(e) => e.stopPropagation()}
-                onClick={toggleHand}
-                title={handRevealed ? 'Volver a ocultar tu mano' : 'Enseñar todas las cartas de tu mano al rival hasta que la vuelvas a ocultar'}
-                style={smallBtn}
-              >
-                {handRevealed ? <EyeOff size={ui.icon} /> : <Eye size={ui.icon} />} {handRevealed ? 'Ocultar mi mano' : 'Enseñar mi mano'}
-              </button>
             )}
           </div>
         </div>
@@ -1954,15 +1937,6 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
           {fullscreenBtn}
         </div>
       </div>
-      {compact && (
-        <button
-          className={handRevealed ? 'btn-primary' : 'btn-secondary'}
-          onClick={toggleHand}
-          style={btn}
-        >
-          {handRevealed ? <EyeOff size={ui.icon} /> : <Eye size={ui.icon} />} {handRevealed ? 'Ocultar mi mano' : 'Enseñar mi mano al rival'}
-        </button>
-      )}
       <div style={{ height: 1, background: 'var(--glass-border)' }} />
       <div style={{ display: 'flex', gap: 6 }}>
         <button className="btn-primary" onClick={() => setShowEnd(true)} disabled={!oppInfo} style={{ ...btn, flex: 1, opacity: oppInfo ? 1 : 0.5 }} title="Registrar quién ha ganado">
