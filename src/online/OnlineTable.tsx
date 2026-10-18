@@ -1172,11 +1172,6 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
             </span>
             {selectedHand && !compact && (
               <>
-                {!solo && (
-                  <button className="btn-secondary" onPointerDown={(e) => e.stopPropagation()} onClick={() => send({ t: 'reveal', id: selectedHand.id })} title="Enseñar esta carta al rival sin jugarla" style={smallBtn}>
-                    <Eye size={ui.icon} /> Enseñar
-                  </button>
-                )}
                 <button
                   className="btn-secondary"
                   onPointerDown={(e) => e.stopPropagation()}
@@ -1237,17 +1232,6 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
               }}
             >
               {cardImage(c.templateId, c, true)}
-              {hovered && !isTouch && !solo && (
-                <button
-                  className="btn-secondary"
-                  onPointerDown={(e) => e.stopPropagation()}
-                  onClick={() => send({ t: 'reveal', id: c.id })}
-                  title="Enseñar esta carta al rival sin jugarla"
-                  style={{ position: 'absolute', left: '50%', bottom: 6, transform: 'translateX(-50%)', padding: '3px 8px', fontSize: 12, background: 'rgba(18,24,38,0.9)' }}
-                >
-                  <Eye size={12} /> Enseñar
-                </button>
-              )}
             </div>
           );
         })}
@@ -2102,11 +2086,6 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
       barTitle = 'Mano';
       barContent = (
         <>
-          {!solo && (
-            <button className="btn-secondary" onClick={() => send({ t: 'reveal', id })} style={barBtn}>
-              <Eye size={16} /> Enseñar
-            </button>
-          )}
           <button
             className="btn-secondary"
             onClick={() => {
