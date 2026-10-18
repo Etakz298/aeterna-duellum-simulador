@@ -1788,14 +1788,17 @@ export const OnlineTable: React.FC<OnlineTableProps> = ({
         [state.me, state.opp].some((sd) => sd.library.top?.templateId === hoverTemplate.templateId || sd.graveyard.some((g) => g.templateId === hoverTemplate.templateId))));
   // Con ratón, la carta seleccionada se queda ampliada aunque el ratón salga de ella (para mover sus tokens desde ahí)
   const selectedPreview = !isTouch && selectedCard?.isFaceUp && selectedCard.templateId ? selectedCard : null;
-  const previewTemplate = pressPreview
+  // Mientras se señala no se amplía ninguna carta (vuelve al terminar de señalar)
+  const previewTemplate = pointing
+    ? undefined
+    : pressPreview
     ? templateMap.get(pressPreview)
     : hoverStillThere
       ? templateMap.get(hoverTemplate!.templateId)
       : selectedPreview
         ? templateMap.get(selectedPreview.templateId!)
         : undefined;
-  const previewCardId = pressPreview ? pressCard : hoverStillThere ? hoverTemplate!.cardId : selectedPreview ? selectedPreview.id : null;
+  const previewCardId = pointing ? null : pressPreview ? pressCard : hoverStillThere ? hoverTemplate!.cardId : selectedPreview ? selectedPreview.id : null;
   // Tokens de la carta ampliada: se ven y se pueden mover desde ahí
   const previewTokens = (big: boolean) => {
     if (!previewCardId) return null;

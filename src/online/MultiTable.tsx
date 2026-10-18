@@ -24,6 +24,7 @@ import {
   Smile,
   Shuffle,
   Trophy,
+  Users,
   X,
 } from 'lucide-react';
 import type { CardTemplate } from '../types';
@@ -262,6 +263,7 @@ export const MultiTable: React.FC<MultiTableProps> = ({
   const [selectedHandId, setSelectedHandId] = useState<string | null>(null);
   // Mano desplegada: tus cartas en grande encima de la mano hasta que la cierres o hagas otra cosa
   const [handFan, setHandFan] = useState(false);
+  const [showTeams, setShowTeams] = useState(false);
   // Móvil: el menú de la carta sale al volver a tocar la carta ya seleccionada
   const [cardMenu, setCardMenu] = useState<string | null>(null);
   // Señalar: la carta `from` apunta a las cartas que se van tocando (hasta 3)
@@ -1904,14 +1906,17 @@ export const MultiTable: React.FC<MultiTableProps> = ({
         })));
   // Con ratón, la carta seleccionada se queda ampliada aunque el ratón salga de ella (para mover sus tokens desde ahí)
   const selectedPreview = !isTouch && selectedCard?.isFaceUp && selectedCard.templateId ? selectedCard : null;
-  const previewTemplate = pressPreview
+  // Mientras se señala no se amplía ninguna carta (vuelve al terminar de señalar)
+  const previewTemplate = pointing
+    ? undefined
+    : pressPreview
     ? templateMap.get(pressPreview)
     : hoverStillThere
       ? templateMap.get(hoverTemplate!.templateId)
       : selectedPreview
         ? templateMap.get(selectedPreview.templateId!)
         : undefined;
-  const previewCardId = pressPreview ? pressCard : hoverStillThere ? hoverTemplate!.cardId : selectedPreview ? selectedPreview.id : null;
+  const previewCardId = pointing ? null : pressPreview ? pressCard : hoverStillThere ? hoverTemplate!.cardId : selectedPreview ? selectedPreview.id : null;
   // Tokens de la carta ampliada: se ven y se pueden mover desde ahí
   const previewTokens = (big: boolean) => {
     if (!previewCardId) return null;
@@ -2035,32 +2040,11 @@ export const MultiTable: React.FC<MultiTableProps> = ({
           </div>
         )}
       </div>
-      {/* 2 contra 2: elegir compañero (los equipos se recolocan en la mesa) */}
+      {/* 2 contra 2: cambiar los equipos (se elige en una ventana aparte) */}
       {state.teams && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <div style={{ fontSize: 12, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Equipos</div>
-          {seats
-            .filter((s) => s !== me)
-            .map((partner) => {
-              const name = (s: Seat) => state.players[s]?.name || 'Sitio libre';
-              const rest = seats.filter((s) => s !== me && s !== partner);
-              const current = partner === ally;
-              return (
-                <button
-                  key={partner}
-                  className={current ? 'btn-primary' : 'btn-secondary'}
-                  data-partner={partner}
-                  onClick={() => !current && send({ t: 'partner', partner })}
-                  title={current ? 'Estos son los equipos ahora' : `Jugar en equipo con ${name(partner)}`}
-                  style={{ ...btn, justifyContent: 'flex-start', textAlign: 'left', cursor: current ? 'default' : 'pointer' }}
-                >
-                  <span>
-                    Tú y <strong>{name(partner)}</strong> <span style={{ opacity: 0.7 }}>contra</span> {rest.map(name).join(' y ')}
-                  </span>
-                </button>
-              );
-            })}
-        </div>
+        <button className="btn-secondary" onClick={() => setShowTeams(true)} style={btn} title="Elegir con quién vas en equipo">
+          <Users size={ui.icon} /> Cambiar grupos
+        </button>
       )}
       <button className={handRevealed ? 'btn-primary' : 'btn-secondary'} onClick={toggleHand} style={btn}>
         {handRevealed ? <EyeOff size={ui.icon} /> : <Eye size={ui.icon} />} {handRevealed ? 'Ocultar mi mano' : 'Enseñar mi mano a los demás'}
@@ -2905,6 +2889,39 @@ export const MultiTable: React.FC<MultiTableProps> = ({
       })()}
 
       {/* Fin de partida: gana un jugador o un equipo */}
+      {showTeams && state.teams && (
+        <Overlay onClose={() => setShowTeams(false)}>
+          <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: 6 }}>Cambiar grupos</h3>
+          <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 16 }}>Elige con quién vas en equipo. La mesa se recoloca para todos.</p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 14 }}>
+            {seats
+              .filter((x) => x !== me)
+              .map((partner) => {
+                const name = (x: Seat) => state.players[x]?.name || 'Sitio libre';
+                const rest = seats.filter((x) => x !== me && x !== partner);
+                const current = partner === ally;
+                return (
+                  <button
+                    key={partner}
+                    className={current ? 'btn-primary' : 'btn-secondary'}
+                    data-partner={partner}
+                    onClick={() => {
+                      if (!current) send({ t: 'partner', partner });
+                      setShowTeams(false);
+                    }}
+                    style={{ padding: '10px 16px', fontSize: '0.95rem' }}
+                  >
+                    Tú y <strong style={{ margin: '0 4px' }}>{name(partner)}</strong> <span style={{ opacity: 0.7, margin: '0 4px' }}>contra</span> {rest.map(name).join(' y ')}
+                    {current && <span style={{ opacity: 0.8, marginLeft: 6 }}>(ahora)</span>}
+                  </button>
+                );
+              })}
+          </div>
+          <button className="btn-secondary" onClick={() => setShowTeams(false)} style={{ padding: '8px 18px' }}>
+            Cancelar
+          </button>
+        </Overlay>
+      )}
       {showEnd && (
         <Overlay onClose={() => setShowEnd(false)}>
           <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: 6 }}>¿Quién ha ganado?</h3>
