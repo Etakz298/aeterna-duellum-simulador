@@ -131,6 +131,7 @@ interface MultiLayout {
   box: (side: SideKey) => SideBox;
   zoneRect: (side: SideKey, zone: ZoneKey) => Rect;
   lifeCol: (side: SideKey) => Rect;
+  lifeArea: (side: SideKey) => Rect; // toda la altura de la columna de vida (vida + carta Especial)
 }
 const QUAD_LIFE_W = 190;
 const multiBarH = (compact: boolean) => (compact ? 100 : 64);
@@ -164,6 +165,11 @@ function makeMultiLayout(compact: boolean, boxes: Partial<Record<SideKey, { x: n
     const play = zoneRect(side, 'play');
     return { x: b.lifeLeft ? b.x : b.x + b.w - b.lifeW, y: play.y, w: b.lifeW, h: play.h };
   };
+  const lifeArea = (side: SideKey): Rect => {
+    const b = box(side);
+    const midY = barH + baseH / 2;
+    return { x: b.lifeLeft ? b.x : b.x + b.w - b.lifeW, y: b.top ? barH : midY, w: b.lifeW, h: baseH / 2 };
+  };
   return {
     compact,
     boardH,
@@ -174,6 +180,7 @@ function makeMultiLayout(compact: boolean, boxes: Partial<Record<SideKey, { x: n
     box,
     zoneRect,
     lifeCol,
+    lifeArea,
   };
 }
 
@@ -866,7 +873,7 @@ export const MultiTable: React.FC<MultiTableProps> = ({
       if (myHand.find((c) => c.id === src.id)?.isSpecial) return;
       const normal = myHand.filter((c) => !c.isSpecial);
       const ids = normal.map((c) => c.id).filter((id) => id !== src.id);
-      const xs = handPositions(myHand, zoneRect('me', 'hand'), true).xs.filter((_, i) => !myHand[i].isSpecial);
+      const xs = handPositions(myHand, zoneRect('me', 'hand')).xs.filter((_, i) => !myHand[i].isSpecial);
       let index = xs.filter((sx) => sx + SMALL_W / 2 < d.x).length;
       index = clamp(index, 0, ids.length);
       ids.splice(index, 0, src.id);
@@ -1252,16 +1259,9 @@ export const MultiTable: React.FC<MultiTableProps> = ({
     });
 
   // Bandeja de la mano propia (como en un jugador, pero dentro de su franja)
-  // Hueco reservado de la carta Especial en la mano
-  const specialSlotFrame = (x: number, y: number) => (
-    <div
-      key={`special-slot-${x}`}
-      style={{ position: 'absolute', left: x - 6, top: y - 6, width: SMALL_W + 12, height: SMALL_H + 12, borderRadius: 12, border: '2px dashed rgba(250, 204, 21, 0.55)', background: 'rgba(250, 204, 21, 0.06)', pointerEvents: 'none' }}
-    />
-  );
   const myHandTray = () => {
     const r = zoneRect('me', 'hand');
-    const { xs: slots, specialX } = handPositions(myHand, r, true);
+    const { xs: slots } = handPositions(myHand, r);
     const handCount = myHand.filter((c) => !c.isSpecial).length;
     const y = r.y + 36;
     // Franja estrecha (2 contra 2): solo el título y el botón de enseñar la mano, sin textos
@@ -1307,8 +1307,8 @@ export const MultiTable: React.FC<MultiTableProps> = ({
             )}
           </div>
         </div>
-        {specialX !== null && specialSlotFrame(specialX, y)}
         {myHand.map((c, i) => {
+          if (c.isSpecial) return null;
           const hovered = (hoverHandId === c.id || selectedHandId === c.id) && !drag;
           return (
             <div
@@ -1375,7 +1375,7 @@ export const MultiTable: React.FC<MultiTableProps> = ({
     const r = zoneRect(side, 'hand');
     const hand = handOf(side);
     const info = infoOf(side);
-    const { xs: slots, specialX } = handPositions(hand, r, !isTop(side));
+    const { xs: slots } = handPositions(hand, r);
     const n = hand.filter((c) => !c.isSpecial).length;
     const y = isTop(side) ? r.y + 8 : r.y + 36;
     const team = teamOf(seatOf(side));
@@ -1389,9 +1389,9 @@ export const MultiTable: React.FC<MultiTableProps> = ({
             {info?.handRevealed && <span style={{ color: 'var(--color-accent)' }}> · la enseña</span>}
           </div>
         </div>
-        {specialX !== null && specialSlotFrame(specialX, y)}
-        {hand.map((c, i) => (
-          <div
+        {hand.map((c, i) =>
+          c.isSpecial ? null : (
+            <div
             key={i}
             className="ol-opp-hand-enter"
             onPointerEnter={(e) => c.templateId && showPreview(e, `opp-hand-${side}-${i}`, c.templateId)}
@@ -1401,8 +1401,9 @@ export const MultiTable: React.FC<MultiTableProps> = ({
           >
             {/* Cuando enseña la mano, sus cartas se dan la vuelta */}
             {flipCard(c.templateId, c, !!c.templateId)}
-          </div>
-        ))}
+            </div>
+          ),
+        )}
       </React.Fragment>
     );
   };
@@ -1423,11 +1424,52 @@ export const MultiTable: React.FC<MultiTableProps> = ({
   const sameDeck = (s: Seat) => !!state.players[s]?.deckId && seats.some((o) => o !== s && state.players[o]?.deckId === state.players[s]?.deckId);
   const colorOf = (s: Seat) => (state.teams ? TEAM_COLORS[teamOf(s)!] : (!sameDeck(s) && backColor[s]) || SEAT_COLORS[s]);
   // Rectángulo de la carta de vida de cada jugador (también para las flechas de señalar)
+  // Si el jugador tiene la carta Especial, la vida sube (y encoge si hace falta) para dejarle sitio debajo
+  const specialOf = (side: SideKey) => handOf(side).find((c) => c.isSpecial && c.templateId);
+  const SPECIAL_W = compact ? 66 : 80;
+  const SPECIAL_H = (SPECIAL_W * SMALL_H) / SMALL_W;
+  const lifeBtnsH = (side: SideKey) => (canControl(side) && lifeTemplateOf(side) ? (compact ? 54 : ui.life + 6) + 8 : 0);
+  const lifeSlot = (side: SideKey, h0: number, ratio: number) => {
+    const col = L.lifeCol(side);
+    if (!specialOf(side)) {
+      const w = h0 * ratio;
+      return { x: col.x + col.w / 2 - w / 2, y: col.y + col.h / 2 - h0 / 2 - (compact || ratio === 1 ? 0 : 14), w, h: h0 };
+    }
+    const area = L.lifeArea(side);
+    const pillH = ratio === 1 ? 0 : 30;
+    const avail = area.h - 20;
+    const rest = pillH + lifeBtnsH(side) + 12 + SPECIAL_H;
+    const h = Math.min(h0, avail - rest);
+    const w = h * ratio;
+    return { x: area.x + area.w / 2 - w / 2, y: area.y + 10 + pillH + (avail - rest - h) / 2, w, h };
+  };
   const lifeRectOf = (side: SideKey) => {
     const col = L.lifeCol(side);
     const h = col.w >= SIDE_W ? (compact ? 226 : 300) : compact ? 190 : 250;
-    const w = h * LIFE_CARD_RATIO;
-    return { x: col.x + col.w / 2 - w / 2, y: col.y + col.h / 2 - h / 2 - (compact ? 0 : 14), w, h };
+    return lifeSlot(side, h, LIFE_CARD_RATIO);
+  };
+  const lifeRectAny = (side: SideKey) => (lifeTemplateOf(side) ? lifeRectOf(side) : lifeSlot(side, Math.min(190, L.lifeCol(side).w - 10), 1));
+  // Carta Especial: fija debajo de la carta de vida; no se mueve, solo se amplía
+  const specialCard = (side: SideKey) => {
+    const c = specialOf(side);
+    if (!c || !state.players[seatOf(side)]?.deckId) return null;
+    const life = lifeRectAny(side);
+    const left = life.x + life.w / 2 - SPECIAL_W / 2;
+    const top = life.y + life.h + lifeBtnsH(side) + 12;
+    const id = `spec-${seatOf(side)}`;
+    return (
+      <div
+        key={id}
+        data-special={seatOf(side)}
+        title="Carta Especial"
+        onPointerEnter={(e) => showPreview(e, id, c.templateId)}
+        onPointerDown={(e) => startDrag(e, { kind: 'view' }, 0, 0, c.templateId)}
+        onPointerLeave={hidePreview}
+        style={{ ...cardFrame, left, top, width: SPECIAL_W, height: SPECIAL_H, zIndex: 50, cursor: 'zoom-in', boxShadow: '0 0 0 2px rgba(250, 204, 21, 0.7), 0 8px 18px rgba(0,0,0,0.5)' }}
+      >
+        {cardImage(c.templateId, c, true)}
+      </div>
+    );
   };
   const lifeTemplateOf = (side: SideKey) => {
     const deckId = state.players[seatOf(side)]?.deckId;
@@ -1511,10 +1553,10 @@ export const MultiTable: React.FC<MultiTableProps> = ({
     const mine = canControl(side);
     const value = lifeOf(side);
     const info = infoOf(side);
-    const col = L.lifeCol(side);
-    const size = Math.min(190, col.w - 10);
-    const cx = col.x + col.w / 2;
-    const cy = col.y + col.h / 2;
+    const slot = lifeRectAny(side);
+    const size = slot.w;
+    const cx = slot.x + size / 2;
+    const cy = slot.y + size / 2;
     const lifeId = `life:${seatOf(side)}`;
     const targetable = !!pointing && !mine;
     return (
@@ -1795,6 +1837,7 @@ export const MultiTable: React.FC<MultiTableProps> = ({
     (myHand.some((c) => c.id === hoverTemplate.cardId) ||
       others.some((o) => handOf(o).some((c, i) => `opp-hand-${o}-${i}` === hoverTemplate.cardId && c.templateId === hoverTemplate.templateId)) ||
       allPlay.some((c) => c.id === hoverTemplate.cardId && c.isFaceUp) ||
+      sides.some((side) => `spec-${seatOf(side)}` === hoverTemplate.cardId && specialOf(side)?.templateId === hoverTemplate.templateId) ||
       // Carta Especial arriba de una biblioteca o en un cementerio
       (hoverTemplate.cardId.startsWith('special-') &&
         sides.some((side) => {
@@ -2268,6 +2311,7 @@ export const MultiTable: React.FC<MultiTableProps> = ({
             );
           })}
           {sides.map((side) => lifeCounter(side))}
+          {sides.map((side) => specialCard(side))}
           {sides.map((side) => libraryPile(side))}
           {sides.map((side) => graveyardPile(side))}
           {others.map((side) => oppHandTray(side))}
@@ -2801,16 +2845,11 @@ export const MultiTable: React.FC<MultiTableProps> = ({
 };
 
 // Posiciones x de las cartas de una mano dentro de su franja (se solapan si no caben)
-// Posiciones de las cartas de una mano: la Especial va en su hueco fijo (a la derecha del dueño;
-// la mano del rival se ve girada, así que allí queda a la izquierda) y el resto se reparte en lo que queda
-const SPECIAL_SLOT = SMALL_W + 30;
-function handPositions(list: { isSpecial?: boolean }[], r: Rect, specialRight: boolean): { xs: number[]; specialX: number | null } {
-  const hasSpecial = list.some((c) => c.isSpecial);
-  const rest = hasSpecial ? { ...r, w: r.w - SPECIAL_SLOT, x: specialRight ? r.x : r.x + SPECIAL_SLOT } : r;
-  const slots = handSlots(list.filter((c) => !c.isSpecial).length, rest);
-  const specialX = hasSpecial ? (specialRight ? r.x + r.w - SPECIAL_SLOT + 12 : r.x + SPECIAL_SLOT - 12 - SMALL_W) : null;
+// La carta Especial no está en la mano: se ve fija, en pequeño, debajo de la carta de vida
+function handPositions(list: { isSpecial?: boolean }[], r: Rect): { xs: number[] } {
+  const slots = handSlots(list.filter((c) => !c.isSpecial).length, r);
   let k = 0;
-  return { xs: list.map((c) => (c.isSpecial ? specialX! : slots[k++])), specialX };
+  return { xs: list.map((c) => (c.isSpecial ? -9999 : slots[k++])) };
 }
 
 function handSlots(n: number, r: Rect): number[] {
