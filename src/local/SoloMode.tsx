@@ -1,5 +1,6 @@
 import React, { useCallback, useState } from 'react';
 import type { CardTemplate } from '../types';
+import type { Seat } from '../online/types';
 import { OnlineTable } from '../online/OnlineTable';
 import { ConfirmModal, Toast } from '../online/OnlineMode';
 import { loadSoloResults, useLocalGame } from './useLocalGame';
@@ -22,7 +23,7 @@ export const SoloMode: React.FC<{
   const game = useLocalGame(localLibrary, {
     onError: toast,
     onMatchEnded: (m) => {
-      const champ = (s: 'p1' | 'p2') => m.players[s].deck || m.players[s].name;
+      const champ = (s: Seat) => m.players[s]?.deck || m.players[s].name;
       toast(m.winner === 'draw' ? 'Partida registrada: empate' : `Partida registrada: gana ${champ(m.winner)}`);
     },
   });

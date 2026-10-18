@@ -30,7 +30,7 @@ function storeSession(s: StoredSession | null) {
 
 export type ConnectionStatus = 'idle' | 'connecting' | 'open' | 'reconnecting';
 
-type Entry = { t: 'create'; name: string } | { t: 'join'; code: string; name: string } | { t: 'resume'; code: string; token: string };
+type Entry = { t: 'create'; name: string; mode?: string } | { t: 'join'; code: string; name: string } | { t: 'resume'; code: string; token: string };
 
 export function useOnlineGame(handlers: {
   onEffects?: (fx: StateEffects) => void;

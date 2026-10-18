@@ -1,6 +1,7 @@
 import type { CardTemplate } from '../types';
 
-export type Seat = 'p1' | 'p2';
+export type Seat = 'p1' | 'p2' | 'p3' | 'p4';
+export type GameMode = 'duel' | 'ffa3' | 'team4';
 export type BackType = 'backA' | 'backB';
 
 // Carta en una zona de juego tal y como la envía el servidor.
@@ -87,6 +88,7 @@ export interface StateEffects {
   select?: string[];
   reveal?: { by: Seat; templateId: string };
   matchEnded?: MatchResult;
+  multiEnded?: { winner: string; label: string | null }; // 3 y 4 jugadores
 }
 
 export interface MatchResult {
@@ -115,4 +117,32 @@ export interface ServerLibrary {
   templates: CardTemplate[];
   backs: Record<string, string>;
   updatedAt: number;
+}
+
+// ---------- Partidas de 3 jugadores (todos contra todos) y 2 contra 2 ----------
+
+export interface MultiSide {
+  library: { count: number; top: CardBackInfo | null; shuffles?: number };
+  graveyard: (CardBackInfo & { id: string })[];
+  play: OnlinePlayCard[];
+  // Mano: la propia con id y templateId; la de los demás solo con el reverso (salvo la Especial)
+  hand: (CardBackInfo & { id?: string; templateId?: string; isSpecial?: boolean })[];
+  selected: string | null; // carta en juego que tiene seleccionada ese jugador
+}
+
+export interface MultiState {
+  code: string;
+  you: Seat;
+  mode: 'ffa3' | 'team4';
+  seats: Seat[];
+  teams: Record<'A' | 'B', Seat[]> | null;
+  rev: number;
+  players: Partial<Record<Seat, OnlinePlayer>>;
+  starter?: Seat;
+  started?: boolean;
+  pointer?: { from: string; targets: string[]; by: Seat; rev: number } | null;
+  sides: Record<Seat, MultiSide>;
+  lives: Record<Seat, number>;
+  tokens: OnlineToken[];
+  log: LogEntry[];
 }

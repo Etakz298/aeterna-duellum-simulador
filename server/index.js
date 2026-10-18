@@ -7,7 +7,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
-import { Game, SEATS } from './game.js';
+import { Game } from './game.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT) || 8080;
@@ -302,7 +302,7 @@ function send(ws, msg) {
 }
 
 function broadcastState(room, fx) {
-  for (const seat of SEATS) {
+  for (const seat of room.game.seats) {
     send(room.sockets[seat], { t: 'state', state: room.game.viewFor(seat), fx });
   }
 }
@@ -371,7 +371,7 @@ wss.on('connection', (ws) => {
 
         if (msg.t === 'create') {
           const code = newCode();
-          room = { game: new Game(code), sockets: {} };
+          room = { game: new Game(code, { mode: String(msg.mode || 'duel') }), sockets: {} };
           rooms.set(code, room);
           ({ seat, token } = room.game.addPlayer(name));
         } else {
@@ -411,7 +411,7 @@ wss.on('connection', (ws) => {
         ws.room = null;
         game.addLog(`${player.name} ha abandonado la partida.`);
         game.bump();
-        if (SEATS.every((s) => !game.players[s] || game.players[s].left)) rooms.delete(game.code);
+        if (game.seats.every((s) => !game.players[s] || game.players[s].left)) rooms.delete(game.code);
         else broadcastState(room);
         ws.close();
         return;
@@ -467,7 +467,7 @@ setInterval(() => {
   }
   const now = Date.now();
   for (const [code, room] of rooms) {
-    const anyone = SEATS.some((s) => room.sockets[s]);
+    const anyone = room.game.seats.some((s) => room.sockets[s]);
     if (!anyone && now - room.game.lastActivity > ROOM_IDLE_MS) rooms.delete(code);
   }
 }, 30000);

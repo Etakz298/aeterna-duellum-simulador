@@ -746,6 +746,31 @@ html.rot-landscape #root {
   font-size: 0.85rem;
   border-radius: 999px;
 }
+/* Tipo de partida al crear la sala */
+.landing-modes {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--glass-border);
+}
+.landing-mode {
+  flex: 1;
+  padding: 9px 4px;
+  border: none;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: var(--font-family);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.landing-mode-on {
+  background: var(--color-accent);
+  color: #fff;
+}
 
 /* Presencia del rival junto a su mano */
 .ol-presence {
@@ -1444,4 +1469,14 @@ html.rot-landscape #root {
   font-size: 16px;
   background: rgba(0, 0, 0, 0.35);
   border: 1px solid var(--glass-border);
+}
+
+/* Menú de la sala en 3 y 4 jugadores */
+.ml-menu button {
+  padding: 10px 12px;
+  font-size: 0.88rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
 }
