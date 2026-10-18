@@ -13,6 +13,8 @@ import {
   Eye,
   EyeOff,
   Hand,
+  Shrink,
+  UnfoldHorizontal,
   Layers,
   Maximize,
   Menu,
@@ -259,6 +261,8 @@ export const MultiTable: React.FC<MultiTableProps> = ({
   const [previewBig, setPreviewBig] = useState(false); // vista previa tocada: a pantalla grande
   const pressTimer = useRef<number | undefined>(undefined);
   const [selectedHandId, setSelectedHandId] = useState<string | null>(null);
+  // Mano desplegada: tus cartas en grande encima de la mano hasta que la cierres o hagas otra cosa
+  const [handFan, setHandFan] = useState(false);
   // Móvil: el menú de la carta sale al volver a tocar la carta ya seleccionada
   const [cardMenu, setCardMenu] = useState<string | null>(null);
   // Señalar: la carta `from` apunta a las cartas que se van tocando (hasta 3)
@@ -348,6 +352,15 @@ export const MultiTable: React.FC<MultiTableProps> = ({
     setSelectedTokenId(null);
     setLifeSel(null);
   };
+  // La mano desplegada se cierra al tocar cualquier otra cosa de la mesa
+  useEffect(() => {
+    if (!handFan) return;
+    const close = (e: PointerEvent) => {
+      if (!(e.target as Element | null)?.closest?.('[data-fan]')) setHandFan(false);
+    };
+    window.addEventListener('pointerdown', close, true);
+    return () => window.removeEventListener('pointerdown', close, true);
+  }, [handFan]);
   const onFullscreen = async () => {
     if (!fullscreenSupported()) return toast(IOS_FULLSCREEN_HINT);
     if (!(await toggleFullscreen())) toast('El navegador no ha permitido la pantalla completa');
@@ -785,6 +798,7 @@ export const MultiTable: React.FC<MultiTableProps> = ({
   const dropRef = useRef<(d: DragState) => void>(() => {});
   dropRef.current = (d: DragState) => {
     const { src } = d;
+    if (d.moved) setHandFan(false);
     if (d.longPress) return;
     if (src.kind === 'view') return;
     if (!d.moved) {
@@ -1259,10 +1273,67 @@ export const MultiTable: React.FC<MultiTableProps> = ({
     });
 
   // Bandeja de la mano propia (como en un jugador, pero dentro de su franja)
+  // Tus cartas desplegadas en grande encima de la mano (se pueden arrastrar desde aquí)
+  const handFanPanel = (hand: Rect) => {
+    const cards = myHand.filter((c) => !c.isSpecial);
+    const n = cards.length;
+    const gap = 16;
+    const pad = 18;
+    const head = 40;
+    const maxW = BOARD_W - 40;
+    const w = Math.min(compact ? 170 : 150, (maxW - pad * 2 - gap * (n - 1)) / n);
+    const h = (w * SMALL_H) / SMALL_W;
+    const panelW = n * w + gap * (n - 1) + pad * 2;
+    const panelH = head + h + pad;
+    const left = clamp(hand.x + hand.w / 2 - panelW / 2, 20, BOARD_W - 20 - panelW);
+    const top = hand.y - 14 - panelH;
+    return (
+      <div key="hand-fan" data-fan className="glass-panel ol-fan" style={{ position: 'absolute', left, top, width: panelW, height: panelH, borderRadius: 20, zIndex: 1000, background: 'rgba(14, 19, 31, 0.97)', border: '1px solid rgba(250, 204, 21, 0.35)', boxShadow: '0 18px 50px rgba(0,0,0,0.7)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, height: head, padding: '0 14px', fontSize: isTouch ? 17 : 15 }}>
+          <Hand size={16} />
+          <strong>Tu mano</strong>
+          <span style={{ color: 'var(--text-muted)', flex: 1 }}>
+            {n} {n === 1 ? 'carta' : 'cartas'}
+          </span>
+          <button className="btn-secondary" onPointerDown={(e) => e.stopPropagation()} onClick={() => setHandFan(false)} title="Cerrar" style={{ ...smallBtn, padding: isTouch ? '6px 8px' : '3px 6px' }}>
+            <X size={ui.icon} />
+          </button>
+        </div>
+        {cards.map((c, i) => {
+          const x = left + pad + i * (w + gap);
+          const y = top + head;
+          return (
+            <div
+              key={c.id}
+              data-fan
+              data-fan-card={c.id}
+              className="ol-fan-card"
+              onPointerDown={(e) => startDrag(e, { kind: 'hand', id: c.id, templateId: c.templateId, back: c, side: 'me' }, x, y, c.templateId)}
+              onPointerEnter={(e) => e.pointerType !== 'touch' && showPreview(e, c.id, c.templateId)}
+              onPointerLeave={hidePreview}
+              style={{
+                ...cardFrame,
+                left: pad + i * (w + gap),
+                top: head,
+                width: w,
+                height: h,
+                cursor: 'grab',
+                animationDelay: `${i * 0.03}s`,
+                opacity: isDragged('hand', c.id) ? 0.25 : 1,
+              }}
+            >
+              {cardImage(c.templateId, c, true)}
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
   const myHandTray = () => {
     const r = zoneRect('me', 'hand');
     const { xs: slots } = handPositions(myHand, r);
     const handCount = myHand.filter((c) => !c.isSpecial).length;
+    const fanOpen = handFan && handCount > 0;
     const y = r.y + 36;
     // Franja estrecha (2 contra 2): solo el título y el botón de enseñar la mano, sin textos
     const narrow = r.w < 700;
@@ -1294,6 +1365,21 @@ export const MultiTable: React.FC<MultiTableProps> = ({
                 </button>
               </>
             )}
+            {handCount > 0 && (
+              <button
+                data-fan
+                className={fanOpen ? 'btn-primary' : 'btn-secondary'}
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={() => {
+                  hidePreview();
+                  setHandFan((v) => !v);
+                }}
+                title={fanOpen ? 'Volver a juntar tus cartas' : 'Ver tus cartas en grande'}
+                style={smallBtn}
+              >
+                {fanOpen ? <Shrink size={ui.icon} /> : <UnfoldHorizontal size={ui.icon} />} {narrow || compact ? '' : fanOpen ? 'Juntar' : 'Ver cartas'}
+              </button>
+            )}
             {!compact && (
               <button
                 className={handRevealed ? 'btn-primary' : 'btn-secondary'}
@@ -1307,6 +1393,7 @@ export const MultiTable: React.FC<MultiTableProps> = ({
             )}
           </div>
         </div>
+        {fanOpen && handFanPanel(r)}
         {myHand.map((c, i) => {
           if (c.isSpecial) return null;
           const hovered = (hoverHandId === c.id || selectedHandId === c.id) && !drag;
