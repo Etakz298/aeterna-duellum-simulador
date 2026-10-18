@@ -1,4 +1,4 @@
-// Estado autoritativo de una partida online 1 contra 1.
+// Estado autoritativo de una partida online (1 contra 1, 3 jugadores o 2 contra 2).
 // El servidor es el único que conoce qué carta es cada carta boca abajo, qué
 // hay en cada biblioteca y en cada mano; a cada jugador solo se le envía su vista.
 //
@@ -20,6 +20,11 @@ const randomInt = (max) => {
 };
 
 export const SEATS = ['p1', 'p2'];
+// Modos: duelo 1 contra 1, tres jugadores todos contra todos y dos contra dos
+export const MODES = { duel: 2, ffa3: 3, team4: 4 };
+const ALL_SEATS = ['p1', 'p2', 'p3', 'p4'];
+// En 2 contra 2 juegan juntos p1 y p3 contra p2 y p4
+export const TEAMS = { A: ['p1', 'p3'], B: ['p2', 'p4'] };
 const LOG_LIMIT = 80;
 
 // Medidas lógicas (deben coincidir con src/online/layout.ts)
@@ -52,17 +57,20 @@ function shuffleInPlace(arr) {
 
 export class Game {
   // free: modo un jugador, una sola persona mueve las cartas de los dos jugadores
-  constructor(code, { free = false } = {}) {
+  constructor(code, { free = false, mode = 'duel' } = {}) {
     this.code = code;
     this.free = free;
+    this.mode = MODES[mode] ? mode : 'duel';
+    this.seats = ALL_SEATS.slice(0, MODES[this.mode]);
+    this.multi = this.mode !== 'duel';
     this.players = {}; // seat -> { name, token, deckId, connected, left }
     // Carta: { id, templateId, deckId, backType, isSpecial, owner, side, zone, order, x, y, isFaceUp, rotation }
     // owner = de quién es el mazo; side = en las zonas de qué jugador está
     this.cards = new Map();
-    this.life = { p1: LIFE_START, p2: LIFE_START };
+    this.life = Object.fromEntries(this.seats.map((s) => [s, LIFE_START]));
     this.tokens = []; // { id, x, y } en coordenadas del tablero vistas por p1
     // Quién juega el primer turno: al azar al crear la sala; cambia al terminar una partida
-    this.starter = webcrypto.getRandomValues(new Uint8Array(1))[0] % 2 ? 'p2' : 'p1';
+    this.starter = this.seats[randomInt(this.seats.length)];
     this.started = false; // se ha jugado alguna carta en esta partida (oculta quién empieza)
     this.pointer = null; // carta que señala a otras: { from, targets, by, rev }
     this.seq = 0;
@@ -74,7 +82,7 @@ export class Game {
   // ---------- Jugadores ----------
 
   addPlayer(name) {
-    const seat = SEATS.find((s) => !this.players[s]);
+    const seat = this.seats.find((s) => !this.players[s]);
     if (!seat) return null;
     const token = randomHex(16);
     this.players[seat] = { name, token, deckId: null, connected: false, handRevealed: false };
@@ -83,7 +91,13 @@ export class Game {
   }
 
   seatForToken(token) {
-    return SEATS.find((s) => this.players[s] && this.players[s].token === token) || null;
+    return this.seats.find((s) => this.players[s] && this.players[s].token === token) || null;
+  }
+
+  // El siguiente jugador en la ronda (el que empieza la próxima partida)
+  nextSeat(seat) {
+    const i = this.seats.indexOf(seat);
+    return this.seats[(i + 1) % this.seats.length];
   }
 
   nameOf(seat) {
@@ -147,6 +161,7 @@ export class Game {
   // ---------- Vista por jugador ----------
 
   viewFor(seat) {
+    if (this.multi) return this.multiViewFor(seat);
     const opp = other(seat);
     const sideView = (side) => {
       const library = this.zoneCards(side, 'library');
@@ -206,6 +221,54 @@ export class Game {
     };
   }
 
+  // Partidas de 3 o 4 jugadores: cada jugador ve sus zonas y las de todos los demás
+  multiViewFor(seat) {
+    const sideView = (side) => {
+      const library = this.zoneCards(side, 'library');
+      const top = library[library.length - 1];
+      return {
+        library: { count: library.length, top: top ? { deckId: top.deckId, backType: top.backType } : null, shuffles: this.shuffles?.[side] || 0 },
+        graveyard: this.zoneCards(side, 'graveyard').map((c) => ({ id: c.id, deckId: c.deckId, backType: c.backType })),
+        play: this.zoneCards(side, 'play').map((c) => {
+          const v = { id: c.id, owner: c.owner, deckId: c.deckId, backType: c.backType, x: c.x, y: c.y, isFaceUp: c.isFaceUp, rotation: c.rotation, order: c.order };
+          if (c.isFaceUp || c.isSpecial) v.templateId = c.templateId;
+          return v;
+        }),
+        // Mano: la propia entera; la de los demás solo los reversos (y la Especial)
+        hand: this.zoneCards(side, 'hand').map((c) =>
+          side === seat || c.isSpecial || this.players[side]?.handRevealed
+            ? { id: side === seat ? c.id : undefined, templateId: c.templateId, deckId: c.deckId, backType: c.backType, ...(c.isSpecial ? { isSpecial: true } : {}) }
+            : { deckId: c.deckId, backType: c.backType },
+        ),
+        selected: (() => {
+          const id = side !== seat ? this.players[side]?.selected : null;
+          return id && this.cards.get(id)?.zone === 'play' ? id : null;
+        })(),
+      };
+    };
+    const players = {};
+    for (const s of this.seats) {
+      const p = this.players[s];
+      if (p) players[s] = { name: p.name, connected: p.connected, visible: p.connected && p.visible !== false, deckId: p.deckId, left: !!p.left, handRevealed: !!p.handRevealed };
+    }
+    return {
+      code: this.code,
+      you: seat,
+      mode: this.mode,
+      seats: this.seats,
+      teams: this.mode === 'team4' ? TEAMS : null,
+      rev: this.rev,
+      players,
+      starter: this.starter,
+      started: this.started,
+      pointer: this.pointer || null,
+      sides: Object.fromEntries(this.seats.map((s) => [s, sideView(s)])),
+      lives: { ...this.life },
+      tokens: this.tokens.filter((t) => t.cardId),
+      log: this.log,
+    };
+  }
+
   // ---------- Acciones ----------
   // Cada acción devuelve { fx?, private? } o lanza un Error con un mensaje para el usuario.
 
@@ -221,7 +284,7 @@ export class Game {
     const deckId = String(msg.deckId || '');
     if (!library.deckNames[deckId]) throw new Error('Ese mazo no existe en el servidor');
     // En 1 vs 1 cada jugador usa un mazo distinto
-    if (!this.free && this.players[other(seat)]?.deckId === deckId) throw new Error('Tu rival ya ha elegido ese mazo: elige otro');
+    if (!this.free && !this.multi && this.players[other(seat)]?.deckId === deckId) throw new Error('Tu rival ya ha elegido ese mazo: elige otro');
     this.players[seat].deckId = deckId;
   }
 
@@ -346,7 +409,7 @@ export class Game {
 
     let card;
     if (msg.from === 'library') {
-      const libSide = this.free && SEATS.includes(msg.fromSide) ? msg.fromSide : seat;
+      const libSide = this.free && this.seats.includes(msg.fromSide) ? msg.fromSide : seat;
       card = this.topOf(libSide, 'library');
       if (!card) throw new Error('Tu biblioteca está vacía');
     } else {
@@ -378,7 +441,7 @@ export class Game {
       else faceUp = card.isFaceUp;
     }
     // Al cementerio se puede mandar una carta a cualquiera de los dos; al resto de zonas, solo a las tuyas
-    const target = to === 'graveyard' && SEATS.includes(msg.toSeat) ? msg.toSeat : seat;
+    const target = to === 'graveyard' && this.seats.includes(msg.toSeat) ? msg.toSeat : seat;
     this.place(card, target, to, { x: msg.x, y: msg.y, faceUp, resetRotation: fromZone !== 'play' });
 
     // Registro: dice qué carta es cuando se ve (boca arriba en juego)
@@ -411,8 +474,10 @@ export class Game {
   act_point(seat, msg) {
     const from = this.cards.get(String(msg.from || ''));
     if (!from || from.zone !== 'play') throw new Error('Solo se puede señalar con una carta en juego');
+    // En 3 y 4 jugadores también se puede señalar la carta de vida de otro jugador ("life:p2")
+    const isLife = (id) => this.multi && id.startsWith('life:') && this.seats.includes(id.slice(5)) && id.slice(5) !== seat;
     const targets = [...new Set((Array.isArray(msg.targets) ? msg.targets : []).map(String))]
-      .filter((id) => id !== from.id && this.cards.get(id)?.zone === 'play')
+      .filter((id) => id !== from.id && (this.cards.get(id)?.zone === 'play' || isLife(id)))
       .slice(0, 3);
     if (!targets.length) {
       this.pointer = null;
@@ -578,6 +643,7 @@ export class Game {
 
   // Fin de partida: devuelve el resultado para guardarlo en el historial
   act_endMatch(seat, msg, library) {
+    if (this.multi) return this.endMultiMatch(seat, msg);
     const winner = msg.winner === 'p1' || msg.winner === 'p2' ? msg.winner : 'draw';
     if (!this.players.p1 || !this.players.p2) throw new Error('Hacen falta dos jugadores para terminar una partida');
     const players = {};
@@ -597,8 +663,20 @@ export class Game {
     return { result, fx: { matchEnded: result } };
   }
 
+  // 3 y 4 jugadores: gana un jugador o un equipo (de momento no se guarda en el historial)
+  endMultiMatch(seat, msg) {
+    const team = this.mode === 'team4' && TEAMS[msg.winner] ? msg.winner : null;
+    const winner = team || (this.seats.includes(msg.winner) ? msg.winner : 'draw');
+    const label = team ? `el equipo de ${TEAMS[team].map((s) => this.nameOf(s)).join(' y ')}` : winner === 'draw' ? null : this.nameOf(winner);
+    this.addLog(label ? `${this.nameOf(seat)} ha terminado la partida: gana ${label}.` : `${this.nameOf(seat)} ha terminado la partida: empate.`, 'reveal');
+    this.starter = this.nextSeat(this.starter || 'p1');
+    this.started = false;
+    if (msg.reset) this.act_reset(seat);
+    return { fx: { multiEnded: { winner, label } } };
+  }
+
   act_reset(seat) {
-    for (const s of SEATS) {
+    for (const s of this.seats) {
       if (!this.players[s]) continue;
       this.players[s].handRevealed = false;
       // En una sala online cada jugador vuelve a elegir campeón
@@ -608,13 +686,13 @@ export class Game {
     this.pointer = null;
     this.cards.clear();
     this.tokens = [];
-    this.life = { p1: LIFE_START, p2: LIFE_START };
+    this.life = Object.fromEntries(this.seats.map((s) => [s, LIFE_START]));
     this.addLog(`${this.nameOf(seat)} ha reiniciado la mesa (sin cartas ni tokens, vidas a ${LIFE_START}${this.free ? "" : "; cada jugador vuelve a elegir campeón"}).`);
   }
 
   // Los jugadores pueden decidir entre ellos quién empieza
   act_toggleStarter(seat) {
-    this.starter = other(this.starter || 'p1');
+    this.starter = this.multi ? this.nextSeat(this.starter || 'p1') : other(this.starter || 'p1');
     this.addLog(`${this.nameOf(seat)} ha cambiado quién empieza: empieza ${this.nameOf(this.starter)}.`);
   }
 

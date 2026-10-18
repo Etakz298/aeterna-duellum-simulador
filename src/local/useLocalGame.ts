@@ -7,7 +7,7 @@ import type { MatchResult, OnlineState, PeekResult, Seat, ServerLibrary } from '
 
 const GAME_KEY = 'solo_game';
 const RESULTS_KEY = 'solo_results';
-export const SOLO_NAMES: Record<Seat, string> = { p1: 'Jugador 1', p2: 'Jugador 2' };
+export const SOLO_NAMES: Partial<Record<Seat, string>> = { p1: 'Jugador 1', p2: 'Jugador 2' };
 
 export function loadSoloResults(): MatchResult[] {
   try {

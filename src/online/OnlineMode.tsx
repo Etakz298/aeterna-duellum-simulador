@@ -2,8 +2,9 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { BookOpen, Gamepad2, Globe, History, KeyRound, Lock, LogIn, LogOut, Maximize, Minimize, PenLine, Plus, Swords, Upload } from 'lucide-react';
 import { IOS_FULLSCREEN_HINT, fullscreenSupported, toggleFullscreen, useIsFullscreen } from '../fullscreen';
 import type { CardTemplate } from '../types';
-import type { PeekResult, Seat, ServerLibrary, StateEffects } from './types';
+import type { GameMode, MultiState, PeekResult, Seat, ServerLibrary, StateEffects } from './types';
 import { OnlineTable } from './OnlineTable';
+import { MultiTable } from './MultiTable';
 import { setRotationAllowed } from '../rotation';
 import { MatchHistory } from './MatchHistory';
 import { loadStoredSession, useOnlineGame } from './useOnlineGame';
@@ -33,6 +34,8 @@ export const OnlineMode: React.FC<OnlineModeProps> = ({ initialCode, localLibrar
   const [serverInput, setServerInput] = useState(serverUrl);
   const [name, setName] = useState(() => localStorage.getItem('online_name') || '');
   const [code, setCode] = useState(initialCode || '');
+  // Tipo de partida al crear la sala: 1 contra 1, 3 jugadores o 2 contra 2
+  const [mode, setMode] = useState<GameMode>('duel');
   // Al entrar con un enlace de invitación solo se ofrece unirse a esa sala
   const [invited, setInvited] = useState(() => !!initialCode);
   const [library, setLibrary] = useState<ServerLibrary>(EMPTY_LIBRARY);
@@ -65,6 +68,7 @@ export const OnlineMode: React.FC<OnlineModeProps> = ({ initialCode, localLibrar
       const m = fx.matchEnded;
       toast(m.winner === 'draw' ? 'Partida registrada: empate' : `Partida registrada: gana ${m.players[m.winner].name}`);
     }
+    if (fx.multiEnded) toast(fx.multiEnded.label ? `Partida terminada: gana ${fx.multiEnded.label}` : 'Partida terminada: empate');
     // Solo se selecciona automáticamente lo que ha hecho este jugador
     if (fx.select && fx.by === youRef.current) setSelectRequest(fx.select);
   }, []);
@@ -123,7 +127,7 @@ export const OnlineMode: React.FC<OnlineModeProps> = ({ initialCode, localLibrar
     return n;
   };
 
-  const handleCreate = () => game.connect(serverUrl, { t: 'create', name: rememberName() });
+  const handleCreate = () => game.connect(serverUrl, { t: 'create', name: rememberName(), mode });
   const handleJoin = () => {
     const c = code.trim().toUpperCase();
     if (!c) return toast('Escribe el código de la sala');
@@ -189,8 +193,28 @@ export const OnlineMode: React.FC<OnlineModeProps> = ({ initialCode, localLibrar
 
   // Pinta la mesa cuando ya estamos en una sala
   if (game.state) {
+    // Partidas de 3 y 4 jugadores: su propia mesa
+    const multi = 'sides' in game.state ? (game.state as unknown as MultiState) : null;
     return (
       <>
+        {multi ? (
+          <MultiTable
+            state={multi}
+            status={game.status}
+            library={library}
+            serverUrl={serverUrl}
+            send={game.send}
+            peek={peek}
+            onClosePeek={() => setPeek(null)}
+            onPeekTaken={(id) => setPeek((p) => (p ? { ...p, cards: p.cards.filter((c) => c.id !== id) } : p))}
+            reveal={reveal}
+            onCloseReveal={() => setReveal(null)}
+            onReloadLibrary={() => loadLibrary(serverUrl)}
+            onLeave={handleLeave}
+            confirm={(title, message, onConfirm) => setModal({ title, message, onConfirm })}
+            toast={toast}
+          />
+        ) : (
         <OnlineTable
           state={game.state}
           status={game.status}
@@ -209,6 +233,7 @@ export const OnlineMode: React.FC<OnlineModeProps> = ({ initialCode, localLibrar
           confirm={(title, message, onConfirm) => setModal({ title, message, onConfirm })}
           toast={toast}
         />
+        )}
         {game.fatalError && (
           <ConfirmModal
             title="Partida cerrada"
@@ -289,7 +314,7 @@ export const OnlineMode: React.FC<OnlineModeProps> = ({ initialCode, localLibrar
           <h1 style={{ fontSize: '2rem', fontWeight: 800, letterSpacing: '-0.8px', lineHeight: 1.1, marginTop: 14 }}>
             Aeterna <span className="landing-accent">Duellum</span>
           </h1>
-          <p style={{ fontSize: '0.92rem', color: 'var(--text-muted)', marginTop: 8 }}>Duelos online 1 contra 1</p>
+          <p style={{ fontSize: '0.92rem', color: 'var(--text-muted)', marginTop: 8 }}>Duelos online: 1 contra 1, 3 jugadores o 2 contra 2</p>
         </div>
 
         <div className="glass-panel" style={{ padding: 22, display: 'flex', flexDirection: 'column', gap: 16, borderRadius: 18 }}>
@@ -318,11 +343,24 @@ export const OnlineMode: React.FC<OnlineModeProps> = ({ initialCode, localLibrar
           ) : (
             <>
               {nameField}
+              <div className="landing-modes" role="radiogroup" aria-label="Tipo de partida">
+                {(
+                  [
+                    ['duel', '1 contra 1'],
+                    ['ffa3', '3 jugadores'],
+                    ['team4', '2 contra 2'],
+                  ] as [GameMode, string][]
+                ).map(([m, text]) => (
+                  <button key={m} role="radio" aria-checked={mode === m} className={mode === m ? 'landing-mode landing-mode-on' : 'landing-mode'} onClick={() => setMode(m)}>
+                    {text}
+                  </button>
+                ))}
+              </div>
               <button className="btn-primary landing-big" disabled={blocked} onClick={handleCreate}>
                 <Plus size={18} /> Crear partida
               </button>
               <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', textAlign: 'center', marginTop: -6 }}>
-                Te daremos un enlace para invitar a tu rival
+                {mode === 'duel' ? 'Te daremos un enlace para invitar a tu rival' : mode === 'ffa3' ? 'Todos contra todos: invita a dos jugadores más' : 'Por parejas: invita a tres jugadores más'}
               </div>
               <div className="landing-or">o únete con un código</div>
               <div style={{ display: 'flex', gap: 8 }}>

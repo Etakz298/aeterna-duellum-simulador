@@ -2885,7 +2885,7 @@ const imgStyle: React.CSSProperties = {
 
 // Sonido suave al recibir un mensaje (dos notas cortas, sin archivos de audio)
 let chatAudio: AudioContext | null = null;
-function playChatSound() {
+export function playChatSound() {
   try {
     const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
     if (!Ctx) return;
@@ -2928,7 +2928,7 @@ const pill: React.CSSProperties = {
 };
 
 
-const Overlay: React.FC<{ onClose: () => void; children: React.ReactNode }> = ({ onClose, children }) => (
+export const Overlay: React.FC<{ onClose: () => void; children: React.ReactNode }> = ({ onClose, children }) => (
   <div
     onPointerDown={onClose}
     style={{
@@ -2956,7 +2956,7 @@ const Overlay: React.FC<{ onClose: () => void; children: React.ReactNode }> = ({
 );
 
 // Borde animado de la carta de vida: un brillo que gira lento con el color del reverso del campeón
-function LifeAura({ left, top, w, h, color }: { left: number; top: number; w: number; h: number; color: string }) {
+export function LifeAura({ left, top, w, h, color }: { left: number; top: number; w: number; h: number; color: string }) {
   const m = 6; // separación entre la carta y el borde
   return (
     <div className="ol-aura" style={{ left: left - m, top: top - m, width: w + m * 2, height: h + m * 2, ['--aura-c' as string]: color } as React.CSSProperties}>
@@ -2968,7 +2968,7 @@ function LifeAura({ left, top, w, h, color }: { left: number; top: number; w: nu
 // Color del reverso: los reversos son rayas de dos tonos del mismo color más el blanco de los iconos.
 // Se juntan los píxeles con color en grupos y, de los dos tonos más repetidos, se elige el más oscuro.
 const backColorCache = new Map<string, string | null>();
-function useBackColor(url: string | undefined): string | null {
+export function useBackColor(url: string | undefined): string | null {
   const [, force] = useState(0);
   useEffect(() => {
     if (!url || backColorCache.has(url)) return;
@@ -3016,11 +3016,11 @@ function useBackColor(url: string | undefined): string | null {
 
 // ---------- Flechas hechas a mano ----------
 
-type Pt = { x: number; y: number };
+export type Pt = { x: number; y: number };
 export type BrushArrow = { body: string; spine: string; head: string; tip: Pt };
 
 // Números al azar repetibles a partir de un texto (igual en los dos jugadores)
-function seededRandom(seed: string) {
+export function seededRandom(seed: string) {
   let h = 1779033703 ^ seed.length;
   for (let i = 0; i < seed.length; i++) {
     h = Math.imul(h ^ seed.charCodeAt(i), 3432918353);
@@ -3038,7 +3038,7 @@ function seededRandom(seed: string) {
 
 // Trazo de pincel de `from` a `to`: curva con algo de azar (a veces en S), grosor que
 // crece y se afina, un ligero temblor y una punta de flecha con las alas algo curvadas
-function brushArrow(from: Pt, to: Pt, rand: () => number, scale: number, into: Pt): BrushArrow {
+export function brushArrow(from: Pt, to: Pt, rand: () => number, scale: number, into: Pt): BrushArrow {
   const dx = to.x - from.x;
   const dy = to.y - from.y;
   const len = Math.hypot(dx, dy) || 1;
