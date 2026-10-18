@@ -24,7 +24,6 @@ export const SEATS = ['p1', 'p2'];
 export const MODES = { duel: 2, ffa3: 3, team4: 4 };
 const ALL_SEATS = ['p1', 'p2', 'p3', 'p4'];
 // En 2 contra 2 juegan juntos p1 y p3 contra p2 y p4
-export const TEAMS = { A: ['p1', 'p3'], B: ['p2', 'p4'] };
 const LOG_LIMIT = 80;
 
 // Medidas lógicas (deben coincidir con src/online/layout.ts)
@@ -62,6 +61,9 @@ export class Game {
     this.free = free;
     this.mode = MODES[mode] ? mode : 'duel';
     this.seats = ALL_SEATS.slice(0, MODES[this.mode]);
+    // Orden de la ronda (y de los sitios en la mesa): en 2 contra 2 alterna los equipos,
+    // así que el equipo A son el 1º y el 3º y el B el 2º y el 4º
+    this.order = [...this.seats];
     this.multi = this.mode !== 'duel';
     this.players = {}; // seat -> { name, token, deckId, connected, left }
     // Carta: { id, templateId, deckId, backType, isSpecial, owner, side, zone, order, x, y, isFaceUp, rotation }
@@ -96,8 +98,12 @@ export class Game {
 
   // El siguiente jugador en la ronda (el que empieza la próxima partida)
   nextSeat(seat) {
-    const i = this.seats.indexOf(seat);
-    return this.seats[(i + 1) % this.seats.length];
+    const i = this.order.indexOf(seat);
+    return this.order[(i + 1) % this.order.length];
+  }
+
+  teams() {
+    return this.mode === 'team4' ? { A: [this.order[0], this.order[2]], B: [this.order[1], this.order[3]] } : null;
   }
 
   nameOf(seat) {
@@ -255,8 +261,8 @@ export class Game {
       code: this.code,
       you: seat,
       mode: this.mode,
-      seats: this.seats,
-      teams: this.mode === 'team4' ? TEAMS : null,
+      seats: this.order,
+      teams: this.teams(),
       rev: this.rev,
       players,
       starter: this.starter,
@@ -665,9 +671,10 @@ export class Game {
 
   // 3 y 4 jugadores: gana un jugador o un equipo (de momento no se guarda en el historial)
   endMultiMatch(seat, msg) {
-    const team = this.mode === 'team4' && TEAMS[msg.winner] ? msg.winner : null;
+    const teams = this.teams();
+    const team = teams && teams[msg.winner] ? msg.winner : null;
     const winner = team || (this.seats.includes(msg.winner) ? msg.winner : 'draw');
-    const label = team ? `el equipo de ${TEAMS[team].map((s) => this.nameOf(s)).join(' y ')}` : winner === 'draw' ? null : this.nameOf(winner);
+    const label = team ? `el equipo de ${teams[team].map((s) => this.nameOf(s)).join(' y ')}` : winner === 'draw' ? null : this.nameOf(winner);
     this.addLog(label ? `${this.nameOf(seat)} ha terminado la partida: gana ${label}.` : `${this.nameOf(seat)} ha terminado la partida: empate.`, 'reveal');
     this.starter = this.nextSeat(this.starter || 'p1');
     this.started = false;
@@ -691,6 +698,15 @@ export class Game {
   }
 
   // Los jugadores pueden decidir entre ellos quién empieza
+  // 2 contra 2: un jugador elige con quién va en equipo (los compañeros se sientan en diagonal
+  // y los turnos alternan equipos)
+  act_partner(seat, msg) {
+    if (this.mode !== 'team4' || !this.seats.includes(msg.partner) || msg.partner === seat) return;
+    const rest = this.order.filter((s) => s !== seat && s !== msg.partner);
+    this.order = [seat, rest[0], msg.partner, rest[1]];
+    this.addLog(`${this.nameOf(seat)} ha cambiado los equipos: ${this.nameOf(seat)} y ${this.nameOf(msg.partner)} contra ${this.nameOf(rest[0])} y ${this.nameOf(rest[1])}.`);
+  }
+
   act_toggleStarter(seat) {
     this.starter = this.multi ? this.nextSeat(this.starter || 'p1') : other(this.starter || 'p1');
     this.addLog(`${this.nameOf(seat)} ha cambiado quién empieza: empieza ${this.nameOf(this.starter)}.`);

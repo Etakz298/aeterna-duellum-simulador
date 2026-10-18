@@ -213,7 +213,6 @@ export const MultiTable: React.FC<MultiTableProps> = ({
     const i = seats.indexOf(me);
     return [...seats.slice(i + 1), ...seats.slice(0, i)];
   }, [seats, me]);
-  const rivals = others.filter((s) => s !== ally);
   const sides: SideKey[] = ['me', ...others];
   const seatOf = (side: SideKey): Seat => (side === 'me' ? me : side);
   const sideOf = (seat: Seat): SideKey => (seat === me ? 'me' : seat);
@@ -280,17 +279,24 @@ export const MultiTable: React.FC<MultiTableProps> = ({
   const compact = fit.compact;
   // Recuadro de cada jugador: en el PC, en 2 contra 2, un cuarto de la mesa cada uno;
   // con 3 jugadores tu mitad es como en el 1 contra 1. En el móvil, igual pero más bajo.
+  // Los sitios siguen la ronda en el sentido del reloj: el siguiente a ti, a tu derecha, y
+  // así sucesivamente (en 2 contra 2 tu compañero queda en diagonal, enfrente de ti)
   const L = useMemo(() => {
     const boxes: Partial<Record<SideKey, { x: number; w: number; top: boolean }>> = {};
     const half = BOARD_W / 2;
-    rivals.forEach((s, i) => (boxes[s] = { x: rivals.length === 1 ? 0 : i * half, w: rivals.length === 1 ? BOARD_W : half, top: true }));
-    if (ally) {
+    if (others.length === 3) {
       boxes.me = { x: 0, w: half, top: false };
-      boxes[ally] = { x: half, w: half, top: false };
-    } else boxes.me = { x: 0, w: BOARD_W, top: false };
+      boxes[others[0]] = { x: half, w: half, top: false };
+      boxes[others[1]] = { x: half, w: half, top: true };
+      boxes[others[2]] = { x: 0, w: half, top: true };
+    } else {
+      boxes.me = { x: 0, w: BOARD_W, top: false };
+      if (others.length === 1) boxes[others[0]] = { x: 0, w: BOARD_W, top: true };
+      else others.forEach((s, i) => (boxes[s] = { x: (others.length - 1 - i) * half, w: half, top: true }));
+    }
     return makeMultiLayout(compact, boxes);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [compact, ally, rivals.join()]);
+  }, [compact, others.join()]);
   // Mano desplegada: la franja de tu mano se ensancha (por encima de lo de al lado)
   // para que sus cartas quepan sin solaparse
   const handRow = (n: number) => n * SMALL_W + Math.max(0, n - 1) * 10 + 32;
@@ -2029,6 +2035,33 @@ export const MultiTable: React.FC<MultiTableProps> = ({
           </div>
         )}
       </div>
+      {/* 2 contra 2: elegir compañero (los equipos se recolocan en la mesa) */}
+      {state.teams && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Equipos</div>
+          {seats
+            .filter((s) => s !== me)
+            .map((partner) => {
+              const name = (s: Seat) => state.players[s]?.name || 'Sitio libre';
+              const rest = seats.filter((s) => s !== me && s !== partner);
+              const current = partner === ally;
+              return (
+                <button
+                  key={partner}
+                  className={current ? 'btn-primary' : 'btn-secondary'}
+                  data-partner={partner}
+                  onClick={() => !current && send({ t: 'partner', partner })}
+                  title={current ? 'Estos son los equipos ahora' : `Jugar en equipo con ${name(partner)}`}
+                  style={{ ...btn, justifyContent: 'flex-start', textAlign: 'left', cursor: current ? 'default' : 'pointer' }}
+                >
+                  <span>
+                    Tú y <strong>{name(partner)}</strong> <span style={{ opacity: 0.7 }}>contra</span> {rest.map(name).join(' y ')}
+                  </span>
+                </button>
+              );
+            })}
+        </div>
+      )}
       <button className={handRevealed ? 'btn-primary' : 'btn-secondary'} onClick={toggleHand} style={btn}>
         {handRevealed ? <EyeOff size={ui.icon} /> : <Eye size={ui.icon} />} {handRevealed ? 'Ocultar mi mano' : 'Enseñar mi mano a los demás'}
       </button>
