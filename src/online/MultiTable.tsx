@@ -2382,39 +2382,69 @@ export const MultiTable: React.FC<MultiTableProps> = ({
               </div>
             );
           })}
-          {/* Quién empieza el primer turno; pulsarlo pasa al siguiente jugador */}
-          {state.starter && joined > 1 && !state.started && (() => {
-            const mine = state.starter === me;
-            return (
-              <button
-                className="btn-secondary ol-starter"
-                onPointerDown={(e) => e.stopPropagation()}
-                onClick={() => send({ t: 'toggleStarter' })}
-                title="Pulsa para que empiece el siguiente jugador"
-                style={{
-                  position: 'absolute',
-                  left: BOARD_W / 2,
-                  top: L.midY,
-                  transform: 'translate(-50%, -50%)',
-                  zIndex: 400,
-                  padding: compact ? '8px 16px' : '6px 14px',
-                  fontSize: compact ? 22 : 15,
-                  background: 'rgba(18,24,38,0.92)',
-                  border: '2px solid #ef4444',
-                  boxShadow: '0 0 18px rgba(239,68,68,0.45)',
-                  fontWeight: 700,
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 6,
-                }}
-              >
-                <span className="ol-starter-arrow" style={{ display: 'flex', color: '#ef4444' }}>
-                  {mine || !isTop(sideOf(state.starter)) ? <ArrowDown size={compact ? 30 : 20} strokeWidth={3} /> : <ArrowUp size={compact ? 30 : 20} strokeWidth={3} />}
-                </span>
-                {mine ? 'Empiezas tú' : `Empieza ${state.players[state.starter]?.name || ''}`}
-              </button>
-            );
-          })()}
+          {/* Orden de turnos hasta que se juega la primera carta: cada jugador lleva su número
+              (en el sentido de la ronda) y el que empieza, una flecha roja. Pulsar cualquiera
+              hace que empiece el siguiente jugador */}
+          {state.starter &&
+            joined > 1 &&
+            !state.started &&
+            sides.map((side) => {
+              const seat = seatOf(side);
+              const order = ((seats.indexOf(seat) - seats.indexOf(state.starter!) + seats.length) % seats.length) + 1;
+              const first = order === 1;
+              const top = isTop(side);
+              const z = zoneRect(side, 'play');
+              const name = side === 'me' ? 'Tú' : state.players[seat]?.name || 'Esperando…';
+              return (
+                <button
+                  key={`turn-${seat}`}
+                  className="btn-secondary ol-turn-badge"
+                  data-turn={seat}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={() => send({ t: 'toggleStarter' })}
+                  title="Orden de turnos. Pulsa para que empiece el siguiente jugador"
+                  style={{
+                    position: 'absolute',
+                    left: z.x + z.w / 2,
+                    top: top ? z.y + z.h - (compact ? 36 : 26) : z.y + (compact ? 36 : 26),
+                    transform: 'translate(-50%, -50%)',
+                    zIndex: 400,
+                    padding: compact ? '6px 16px 6px 6px' : '4px 12px 4px 4px',
+                    fontSize: compact ? 22 : 15,
+                    background: 'rgba(18,24,38,0.92)',
+                    border: `2px solid ${first ? '#ef4444' : colorOf(seat)}`,
+                    boxShadow: first ? '0 0 18px rgba(239,68,68,0.45)' : '0 6px 16px rgba(0,0,0,0.4)',
+                    fontWeight: 700,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    opacity: first ? 1 : 0.9,
+                  }}
+                >
+                  <span
+                    style={{
+                      display: 'grid',
+                      placeItems: 'center',
+                      width: compact ? 36 : 26,
+                      height: compact ? 36 : 26,
+                      borderRadius: '50%',
+                      background: first ? '#ef4444' : colorOf(seat),
+                      color: '#0b1020',
+                      fontSize: compact ? 20 : 14,
+                      fontWeight: 800,
+                    }}
+                  >
+                    {order}
+                  </span>
+                  {first ? (side === 'me' ? 'Empiezas tú' : `Empieza ${name}`) : `${order}º turno · ${name}`}
+                  {first && (
+                    <span className="ol-starter-arrow" style={{ display: 'flex', color: '#ef4444' }}>
+                      {top ? <ArrowUp size={compact ? 30 : 20} strokeWidth={3} /> : <ArrowDown size={compact ? 30 : 20} strokeWidth={3} />}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
           {!myInfo?.deckId && (() => {
             const z = zoneRect('me', 'play');
             return (
